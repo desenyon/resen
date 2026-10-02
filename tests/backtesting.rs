@@ -1,8 +1,5 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use resen::{
-    backtest::{qc_auth, read_lean_statistics, scaffold},
-    config::{Config, Paths, Secrets},
-};
+use resen::backtest::{qc_auth, read_lean_statistics, scaffold};
 #[test]
 fn quantconnect_auth_matches_independent_sha256_fixture() {
     let value = qc_auth("123", "token", 1700000000);
@@ -44,6 +41,7 @@ fn lean_statistics_reader_skips_nonresult_files() {
 #[cfg(unix)]
 #[test]
 fn lean_cli_contract_drains_diagnostics_and_parses_results() {
+    use resen::config::{Config, Paths, Secrets};
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("workspace");
