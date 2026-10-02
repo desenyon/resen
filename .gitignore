@@ -1,0 +1,10 @@
+/target/
+/dist/
+/.qa/
+/.resen/
+*.db
+*.db-shm
+*.db-wal
+.env
+credentials.json
+.DS_Store

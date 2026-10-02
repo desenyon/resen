@@ -1,0 +1,40 @@
+[package]
+name = "resen"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "A terminal research desk for evidence-driven financial analysis"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+csv = "1"
+directories = "6"
+futures-util = "0.3"
+ratatui = { version = "=0.30.2", features = ["unstable-rendered-line-info"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "sync", "time", "io-util", "signal"] }
+toml = "0.9"
+unicode-width = "0.2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+
+[[bin]]
+name = "resen"
+path = "src/main.rs"
