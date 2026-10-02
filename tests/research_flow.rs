@@ -1,8 +1,9 @@
+#[cfg(unix)]
+use resen::domain::ProviderKind;
 use resen::{
     app::App,
     config::{Config, Paths, Secrets},
     data::{DataClient, import_prices},
-    domain::ProviderKind,
 };
 
 fn fixture(path: &std::path::Path) {
