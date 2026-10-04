@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
-from package_release import PLATFORMS
+from package_release import PLATFORMS, verify_windows_runtime
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -52,6 +52,7 @@ def main():
             with zipfile.ZipFile(archive) as package:
                 metadata = json.loads(package.read("RELEASE.json"))
                 binary = package.read("resen.exe")
+                verify_windows_runtime(binary)
             installed = args.output / "resen.exe"
             installed.write_bytes(binary)
         else:

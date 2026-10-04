@@ -27,9 +27,11 @@ jobs:
           - os: windows-2025
             name: windows-x86_64
             target: x86_64-pc-windows-msvc
+            rustflags: '-C target-feature=+crt-static'
     runs-on: ${{ matrix.os }}
     env:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
+      RUSTFLAGS: ${{ matrix.rustflags || '' }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:

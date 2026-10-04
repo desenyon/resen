@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tarfile
 import tomllib
@@ -26,6 +27,36 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def verify_windows_runtime(data):
+    """Reject release binaries that require an extra Visual C++ runtime install."""
+    pe = struct.unpack_from('<I', data, 0x3c)[0]
+    if data[pe:pe + 4] != b'PE\x00\x00':
+        raise ValueError('Windows executable has no PE header')
+    count = struct.unpack_from('<H', data, pe + 6)[0]
+    optional_size = struct.unpack_from('<H', data, pe + 20)[0]
+    optional = pe + 24
+    if struct.unpack_from('<H', data, optional)[0] != 0x20b:
+        raise ValueError('Windows release must be a PE32+ executable')
+    imports = struct.unpack_from('<I', data, optional + 120)[0]
+    sections = optional + optional_size
+    ranges = [struct.unpack_from('<IIII', data, sections + 40 * index + 8)
+              for index in range(count)]
+
+    def offset(rva):
+        for virtual_size, address, size, start in ranges:
+            if address <= rva < address + max(virtual_size, size):
+                return start + rva - address
+        raise ValueError('Unmapped Windows import address')
+
+    position = offset(imports)
+    while any(data[position:position + 20]):
+        start = offset(struct.unpack_from('<I', data, position + 12)[0])
+        name = data[start:data.index(b'\x00', start)].decode('ascii').lower()
+        if name.startswith(('vcruntime', 'msvcp', 'concrt', 'api-ms-win-crt')) or name == 'ucrtbase.dll':
+            raise ValueError(f'Windows binary requires an extra C runtime: {name}')
+        position += 20
+
+
 def release_files(binary, platform):
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
     output = subprocess.check_output([str(binary.resolve()), "--version"], text=True, timeout=10).strip()
@@ -35,6 +66,8 @@ def release_files(binary, platform):
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     name = "resen.exe" if platform.startswith("windows") else "resen"
     data = binary.read_bytes()
+    if platform.startswith('windows'):
+        verify_windows_runtime(data)
     metadata = {"version": version, "platform": platform, "target": PLATFORMS[platform],
                 "revision": revision, "binary_sha256": digest(data)}
     return {name: data, "LICENSE": (ROOT / "LICENSE").read_bytes(),
@@ -83,6 +116,7 @@ def collect(source, output):
             with zipfile.ZipFile(path) as archive:
                 metadata = json.loads(archive.read("RELEASE.json"))
                 binary = archive.read("resen.exe")
+                verify_windows_runtime(binary)
         else:
             with tarfile.open(path) as archive:
                 metadata = json.load(archive.extractfile("RELEASE.json"))
