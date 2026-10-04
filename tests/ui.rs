@@ -140,7 +140,7 @@ fn all_dialogs_render_without_overflow_or_panics() {
     for size in [(60, 18), (80, 24), (144, 46)] {
         for modal in [
             Modal::Welcome,
-            Modal::Help,
+            Modal::Help { scroll: 0 },
             Modal::Palette {
                 input: Input::new("research"),
                 selected: 0,
@@ -421,4 +421,78 @@ fn multiline_question_start_cursor_is_visible() {
     });
     let output = draw(&mut app, 80, 24);
     assert!(output.contains("▏first line"));
+}
+
+#[test]
+fn compact_welcome_keeps_setup_and_demo_actions_visible() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Welcome);
+    for (w, h) in [(60, 18), (80, 24), (144, 46)] {
+        let output = draw(&mut app, w, h);
+        assert!(output.contains("enter  set up"), "setup hidden at {w}x{h}");
+        assert!(output.contains("d  explore"), "demo hidden at {w}x{h}");
+    }
+}
+
+#[test]
+fn compact_forms_keep_focused_values_and_submission_visible() {
+    let (_dir, mut app) = app();
+    for (w, h) in [(60, 18), (80, 24), (144, 46)] {
+        app.modal = Some(Modal::Compose {
+            kind: ResearchKind::Company,
+            symbols: Input::new("AAPL"),
+            question: Input::new("unique-question"),
+            focus: 2,
+            prior: None,
+        });
+        let output = draw(&mut app, w, h);
+        assert!(
+            output.contains("unique-question"),
+            "question hidden at {w}x{h}"
+        );
+        assert!(output.contains("ctrl+r"));
+        for focus in 0..4 {
+            app.modal = Some(Modal::Strategy {
+                fields: [
+                    Input::new("11"),
+                    Input::new("66"),
+                    Input::new("123456"),
+                    Input::new("22"),
+                ],
+                focus,
+            });
+            let output = draw(&mut app, w, h);
+            assert!(
+                output.contains(["11▏", "66▏", "123456▏", "22▏"][focus]),
+                "strategy focus {focus} hidden at {w}x{h}"
+            );
+            assert!(
+                output.contains("enter run"),
+                "strategy submit hidden at {w}x{h}"
+            );
+        }
+        app.modal = Some(Modal::Lean {
+            project: Input::new("reviewed-project"),
+        });
+        let output = draw(&mut app, w, h);
+        assert!(output.contains("reviewed-project"));
+        assert!(output.contains("enter execute"));
+        assert!(output.contains("Docker"));
+    }
+}
+
+#[test]
+fn help_scrolls_to_form_controls_and_back_at_small_sizes() {
+    let (_dir, mut app) = app();
+    for (w, h) in [(60, 18), (80, 24)] {
+        app.modal = Some(Modal::Help { scroll: 0 });
+        app.handle_key(key(KeyCode::End)).unwrap();
+        let output = draw(&mut app, w, h);
+        assert!(output.contains("Remove local credential"));
+        assert!(output.contains("PgUp/PgDn"));
+        app.handle_key(key(KeyCode::Up)).unwrap();
+        draw(&mut app, w, h);
+        app.handle_key(key(KeyCode::Home)).unwrap();
+        assert!(draw(&mut app, w, h).contains("Make the desk your own."));
+    }
 }

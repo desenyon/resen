@@ -360,7 +360,9 @@ pub enum Modal {
         focus: usize,
     },
     Welcome,
-    Help,
+    Help {
+        scroll: u16,
+    },
     Settings(Box<SettingsForm>),
     Compose {
         kind: ResearchKind,
@@ -720,7 +722,7 @@ impl App {
                     selected: 0,
                 })
             }
-            KeyCode::Char('?') => self.modal = Some(Modal::Help),
+            KeyCode::Char('?') => self.modal = Some(Modal::Help { scroll: 0 }),
             KeyCode::Char(c @ '1'..='6') => {
                 self.page = Page::ALL[c as usize - '1' as usize];
                 self.scroll = 0;
@@ -871,11 +873,16 @@ impl App {
                 }
                 _ => {}
             },
-            Modal::Help => {
-                if key.code == KeyCode::Enter {
-                    retain = false;
-                }
-            }
+            Modal::Help { scroll } => match key.code {
+                KeyCode::Enter => retain = false,
+                KeyCode::Down | KeyCode::Char('j') => *scroll = scroll.saturating_add(1),
+                KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+                KeyCode::PageDown => *scroll = scroll.saturating_add(8),
+                KeyCode::PageUp => *scroll = scroll.saturating_sub(8),
+                KeyCode::Home => *scroll = 0,
+                KeyCode::End => *scroll = u16::MAX,
+                _ => {}
+            },
             Modal::Compose {
                 kind,
                 symbols,

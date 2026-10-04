@@ -103,8 +103,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Page::Connections => connections(f, content, app),
     }
     footer(f, root[2], app);
-    if let Some(modal) = &app.modal {
-        render_modal(f, area, modal, app);
+    if let Some(mut modal) = app.modal.take() {
+        render_modal(f, area, &mut modal, app);
+        app.modal = Some(modal);
     }
     if let Some((message, _, error)) = &app.toast {
         let width = area.width.saturating_sub(6).min(104);
@@ -1313,7 +1314,7 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
         height,
     )
 }
-fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
+fn render_modal(f: &mut Frame, area: Rect, modal: &mut Modal, app: &App) {
     // Dim the existing interface while preserving its spatial context.
     for y in area.y..area.bottom() {
         for x in area.x..area.right() {
@@ -1324,7 +1325,7 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
     let (width, height, heading) = match modal {
         Modal::Import { .. } => (82, 18, " IMPORT PRICE HISTORY "),
         Modal::Welcome => (78, 25, " WELCOME TO RESEN "),
-        Modal::Help => (82, 30, " THE KEYBOARD IS YOUR COMMAND CENTER "),
+        Modal::Help { .. } => (82, 30, " THE KEYBOARD IS YOUR COMMAND CENTER "),
         Modal::Settings(form) => (
             90,
             if form.wizard {
@@ -1377,9 +1378,18 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             );
         }
         Modal::Welcome => {
-            text(
-                f,
-                inner,
+            let rows = split(inner, [Constraint::Min(0), Constraint::Length(2)]);
+            let content = if rows[0].height < 19 {
+                Text::from(vec![
+                    Line::styled("◈  r e s e n", bold(MINT)),
+                    Line::raw(""),
+                    Line::styled("Your financial research desk.", bold(TEXT)),
+                    Line::raw(""),
+                    Line::styled("01  Choose your model", style(MUTED)),
+                    Line::styled("02  Connect your evidence", style(MUTED)),
+                    Line::styled("03  Keep source-led research", style(MUTED)),
+                ])
+            } else {
                 Text::from(vec![
                     Line::styled("◈  r e s e n", bold(MINT)),
                     Line::raw(""),
@@ -1411,20 +1421,19 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
                         "    Source-led research with a persistent local archive",
                         style(DIM),
                     ),
-                    Line::raw(""),
-                    Line::styled(
-                        "enter  set up your desk     d  explore the demo",
-                        style(MINT),
-                    ),
-                    Line::styled("esc  explore without setup", style(DIM)),
-                ]),
-                TEXT,
+                ])
+            };
+            text(f, rows[0], content, TEXT);
+            text(
+                f,
+                rows[1],
+                "enter  set up   d  explore demo\nesc  explore without setup",
+                MINT,
             );
         }
-        Modal::Help => text(
-            f,
-            inner,
-            Text::from(vec![
+        Modal::Help { scroll } => {
+            let rows = split(inner, [Constraint::Min(0), Constraint::Length(1)]);
+            let content = Text::from(vec![
                 Line::styled("Make the desk your own.", bold(MINT)),
                 Line::raw(""),
                 Line::raw("1–6 / tab     Navigate workspace pages"),
@@ -1453,9 +1462,22 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
                     "No Nerd Font required. Truecolor and a readable monospace font recommended.",
                     style(MUTED),
                 ),
-            ]),
-            TEXT,
-        ),
+            ]);
+            let paragraph = Paragraph::new(content)
+                .style(style(TEXT))
+                .wrap(Wrap { trim: false });
+            let max_scroll = paragraph
+                .line_count(rows[0].width)
+                .saturating_sub(rows[0].height as usize) as u16;
+            *scroll = (*scroll).min(max_scroll);
+            f.render_widget(paragraph.scroll((*scroll, 0)), rows[0]);
+            text(
+                f,
+                rows[1],
+                "↑↓ / PgUp/PgDn scroll   Home/End   esc close",
+                MINT,
+            );
+        }
         Modal::Settings(form) => settings_modal(f, inner, form),
         Modal::Compose {
             kind,
@@ -1464,14 +1486,15 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             focus,
             prior,
         } => {
+            let compact = inner.height < 17;
             let rows = split(
                 inner,
                 [
-                    Constraint::Length(2),
+                    Constraint::Length(if compact { 0 } else { 2 }),
+                    Constraint::Length(if compact { 1 } else { 3 }),
+                    Constraint::Length(if compact { 0 } else { 1 }),
                     Constraint::Length(3),
-                    Constraint::Length(1),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
+                    Constraint::Length(if compact { 0 } else { 1 }),
                     Constraint::Min(3),
                     Constraint::Length(2),
                 ],
@@ -1486,14 +1509,18 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
                 },
                 MUTED,
             );
+            let workflow = Paragraph::new(format!("‹  {}  ›", kind.label()))
+                .style(style(if *focus == 0 { MINT } else { TEXT }));
             f.render_widget(
-                Paragraph::new(format!("‹  {}  ›", kind.label()))
-                    .style(style(if *focus == 0 { MINT } else { TEXT }))
-                    .block(panel(" WORKFLOW ").border_style(style(if *focus == 0 {
+                if compact {
+                    workflow
+                } else {
+                    workflow.block(panel(" WORKFLOW ").border_style(style(if *focus == 0 {
                         MINT
                     } else {
                         LINE
-                    }))),
+                    })))
+                },
                 rows[1],
             );
             input_widget(
@@ -1554,12 +1581,9 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             let rows = split(
                 inner,
                 [
-                    Constraint::Length(2),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
+                    Constraint::Length(1),
                     Constraint::Min(0),
+                    Constraint::Length(2),
                 ],
             );
             text(
@@ -1568,7 +1592,9 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
                 format!("{} / long-cash moving-average trend", app.selected_symbol()),
                 MUTED,
             );
-            for (i, label) in [
+            let capacity = (rows[1].height / 3).clamp(1, 4) as usize;
+            let start = focus.saturating_add(1).saturating_sub(capacity);
+            for (index, label) in [
                 " FAST WINDOW (DAYS) ",
                 " SLOW WINDOW (DAYS) ",
                 " INITIAL CAPITAL ",
@@ -1576,21 +1602,30 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             ]
             .iter()
             .enumerate()
+            .skip(start)
+            .take(capacity)
             {
-                input_widget(f, rows[i + 1], &fields[i], *focus == i, false, label);
+                let field_area = Rect::new(
+                    rows[1].x,
+                    rows[1].y + (index - start) as u16 * 3,
+                    rows[1].width,
+                    3,
+                );
+                input_widget(f, field_area, &fields[index], *focus == index, false, label);
             }
             text(
                 f,
-                rows[5],
-                "Signals use previous closes; fills use next opens.\nenter run study   tab fields   esc close",
+                rows[2],
+                "enter run   tab fields   esc close\nPrior-close signals; next-open fills; fixed costs.",
                 MINT,
             );
         }
         Modal::Lean { project } => {
+            let compact = inner.height < 15;
             let rows = split(
                 inner,
                 [
-                    Constraint::Length(5),
+                    Constraint::Length(if compact { 3 } else { 5 }),
                     Constraint::Length(3),
                     Constraint::Min(0),
                 ],
@@ -1598,7 +1633,11 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             text(
                 f,
                 rows[0],
-                "This executes code in your reviewed project through LEAN + Docker.\nSet the workspace in Connections; run lean init and cache its image first.\n\nThe desk never executes model-generated code automatically.",
+                if compact {
+                    "Executes reviewed code via LEAN + Docker.\nWorkspace must be initialized with a cached image."
+                } else {
+                    "This executes code in your reviewed project through LEAN + Docker.\nSet the workspace in Connections; run lean init and cache its image first.\n\nThe desk never executes model-generated code automatically."
+                },
                 MUTED,
             );
             input_widget(
@@ -1612,7 +1651,11 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             text(
                 f,
                 rows[2],
-                "lean backtest <project> --output <run-folder> --no-update\n\nenter execute reviewed project   esc close\nCtrl+C cancels the runner; inspect Docker for any remaining container.",
+                if compact {
+                    "enter execute   esc close\nCtrl+C stops runner; inspect Docker containers."
+                } else {
+                    "lean backtest <project> --output <run-folder> --no-update\n\nenter execute reviewed project   esc close\nCtrl+C cancels the runner; inspect Docker for any remaining container."
+                },
                 GOLD,
             );
         }
