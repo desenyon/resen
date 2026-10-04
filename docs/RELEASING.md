@@ -6,7 +6,9 @@ local `dist/` archives: their recorded revision may predate the tag.
 1. Update `Cargo.toml`, the matching `Cargo.lock` package version, `CHANGELOG.md`
    and `docs/releases/vVERSION.md`. Keep installation examples current.
 2. Run formatting, Clippy, Rust tests, optimized build and `make qa`.
-   Push focused commits and wait for all `Verify` jobs to pass.
+   Push focused commits and wait for all `Verify` jobs to pass. Dispatch
+   `Release artifacts` on main for a native packaging preflight; it exercises
+   all five platforms without publishing a draft or changing any tag.
 3. Create and push the matching annotated tag:
 
    ```sh

@@ -79,7 +79,9 @@ members=$(tar -tzf "$tmp/archive.tar.gz") || die 'Invalid release archive.'
 count=$(printf '%s\n' "$members" | awk '$0 == "resen" {n++} END {print n+0}')
 [ "$count" -eq 1 ] || die 'Archive must contain exactly one resen executable.'
 mkdir -p "$install_dir" || die 'Cannot create the installation directory. Try --dir.'
-[ ! -d "$install_dir/resen" ] && [ ! -L "$install_dir/resen" ] || die 'Destination is a directory or symlink; choose another --dir.'
+if [ -d "$install_dir/resen" ] || [ -L "$install_dir/resen" ]; then
+    die 'Destination is a directory or symlink; choose another --dir.'
+fi
 stage=$(mktemp "$install_dir/.resen-install.XXXXXX") || die 'Installation directory is not writable. Try --dir.'
 tar -xzOf "$tmp/archive.tar.gz" resen > "$stage" || die 'Could not read the release executable.'
 [ -s "$stage" ] || die 'Release executable is empty.'
