@@ -52,9 +52,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools shellcheck
-          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
-          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+          printf '%s\n' 'CC=musl-gcc' \
+            'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' \
+            'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
           shellcheck install.sh
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked --target ${{ matrix.target }} -- -D warnings
