@@ -10,6 +10,7 @@ A native financial workspace, built for the terminal.
 [![Rust 1.89+](https://img.shields.io/badge/Rust-1.89%2B-d9ae73?style=flat-square&labelColor=171d28)](Cargo.toml)
 [![Terminal native](https://img.shields.io/badge/interface-terminal_native-91d6bd?style=flat-square&labelColor=171d28)](docs/UI_RESEARCH.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-aab8d5?style=flat-square&labelColor=171d28)](LICENSE)
+[![Download](https://img.shields.io/github/v/release/desenyon/resen?style=flat-square&labelColor=171d28&color=91d6bd)](https://github.com/desenyon/resen/releases/latest)
 
 [Get started](#get-started) · [Models](#setup-and-models) · [Data sources](#evidence-connections) · [Strategy lab](#lean-and-quantconnect) · [CLI](#headless-use)
 
@@ -35,27 +36,55 @@ share one native Rust executable. No application server is required.
 
 ## Get started
 
-Rust 1.89+ and a C compiler are required to build; SQLite is bundled.
+Install the latest release on **macOS or Linux**, including Apple Silicon and
+ARM64 Linux. No compiler or sudo required; SQLite is bundled.
 
 ```sh
-# Clone and install.
+curl -fsSL https://github.com/desenyon/resen/releases/latest/download/install.sh | sh
+
+# Explore the full interface without keys or network access.
+~/.local/bin/resen --demo
+
+# Connect your model and evidence sources.
+~/.local/bin/resen setup
+```
+
+The installer verifies SHA-256 checksums and tests the executable before replacing
+an existing installation. Run the command again to upgrade; your research,
+settings and credentials stay in their existing state directory. Add
+`$HOME/.local/bin` to your PATH to use `resen` directly.
+
+| Platform | Download |
+| --- | --- |
+| macOS 13+, Apple Silicon or Intel | Shell installer or native `.tar.gz` |
+| Linux, ARM64 or x86_64 | Shell installer or static musl `.tar.gz` |
+| Windows, x86_64 | Extract `resen.exe` from the [release ZIP](https://github.com/desenyon/resen/releases/latest) and run `.\resen.exe --demo` |
+
+Archives and `SHA256SUMS` are available on [GitHub Releases](https://github.com/desenyon/resen/releases/latest).
+macOS binaries are unsigned and not notarized. Choose a directory or pin a version:
+
+```sh
+curl -fsSL https://github.com/desenyon/resen/releases/download/v0.2.0/install.sh \
+  | sh -s -- --version v0.2.0 --dir "$HOME/.local/bin"
+```
+
+<details>
+<summary><strong>Build from source</strong></summary>
+
+Rust 1.89+ and a C compiler are required.
+
+```sh
 git clone https://github.com/desenyon/resen.git
 cd resen
 cargo install --path . --locked
-
-# Explore the full interface without keys or network access.
 resen --demo
 
-# Connect your model and evidence sources.
-resen setup
-```
-
-Prefer to run directly from the build directory?
-
-```sh
+# Or run directly from the build directory.
 cargo build --release --locked
 ./target/release/resen --demo
 ```
+
+</details>
 
 Use a truecolor terminal and a readable monospace font. No Nerd Font is required.
 144×46 or larger gives the full research desk; 80×24 works in compact mode. The
