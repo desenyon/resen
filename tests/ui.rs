@@ -336,3 +336,89 @@ fn palette_can_open_a_dialog_without_losing_it() {
     app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(matches!(app.modal, Some(Modal::Settings(_))));
 }
+
+#[test]
+fn pasted_palette_query_resets_selection_and_opens_match() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Palette {
+        input: Input::default(),
+        selected: 10,
+    });
+    app.handle_event(crossterm::event::Event::Paste("connections".into()))
+        .unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(matches!(app.modal, Some(Modal::Settings(_))));
+}
+
+#[test]
+fn palette_with_no_matches_stays_open_and_explains_recovery() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Palette {
+        input: Input::new("zz-no-command"),
+        selected: 0,
+    });
+    assert!(draw(&mut app, 80, 24).contains("No matching commands"));
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(matches!(app.modal, Some(Modal::Palette { .. })));
+}
+
+#[test]
+fn pasted_archive_query_resets_selection_and_normalizes_lines() {
+    let (_dir, mut app) = app();
+    seed(&mut app);
+    app.page = Page::Archive;
+    app.archive_search = true;
+    app.archive_selected = 12;
+    app.handle_event(crossterm::event::Event::Paste("NVDA\n".into()))
+        .unwrap();
+    assert_eq!(app.archive_selected, 0);
+    assert_eq!(app.archive_filter.text, "NVDA ");
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert_eq!(app.page, Page::Research);
+}
+
+#[test]
+fn long_input_cursor_remains_visible_at_start_middle_and_end() {
+    let (_dir, mut app) = app();
+    let value = format!(
+        "START {} MIDDLE {} END",
+        "研究 words ".repeat(50),
+        "more text ".repeat(50)
+    );
+    for cursor in [0, value.find("MIDDLE").unwrap(), value.len()] {
+        app.modal = Some(Modal::Import {
+            symbol: Input::new("AAPL"),
+            path: Input {
+                text: value.clone(),
+                cursor,
+            },
+            focus: 1,
+        });
+        let output = draw(&mut app, 80, 24);
+        assert!(output.contains('▏'), "cursor {cursor} hidden");
+        if cursor == 0 {
+            assert!(output.contains("START"));
+        }
+        if cursor == value.len() {
+            assert!(output.contains("END"));
+        }
+    }
+}
+
+#[test]
+fn multiline_question_start_cursor_is_visible() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Compose {
+        kind: ResearchKind::Company,
+        symbols: Input::new("AAPL"),
+        question: Input {
+            text: "first line\n".to_string() + &"another line\n".repeat(30),
+            cursor: 0,
+        },
+        focus: 2,
+        prior: None,
+    });
+    let output = draw(&mut app, 80, 24);
+    assert!(output.contains("▏first line"));
+}

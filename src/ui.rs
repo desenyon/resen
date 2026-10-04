@@ -14,6 +14,7 @@ use ratatui::{
         Sparkline, Table, TableState, Wrap,
     },
 };
+use unicode_width::UnicodeWidthChar;
 
 pub const BG: Color = Color::Rgb(12, 16, 21);
 pub const PANEL: Color = Color::Rgb(17, 23, 30);
@@ -1522,6 +1523,14 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &Modal, app: &App) {
             );
             input_widget(f, rows[0], input, true, false, " SEARCH COMMANDS ");
             let matches = App::palette_matches(&input.text);
+            if matches.is_empty() {
+                text(
+                    f,
+                    rows[1],
+                    "No matching commands.\nEdit the search or press Ctrl+U to clear it.",
+                    MUTED,
+                );
+            }
             let items: Vec<_> = matches
                 .iter()
                 .map(|i| {
@@ -1688,35 +1697,40 @@ fn input_widget(
     let block = panel(label.to_string()).border_style(style(if focused { MINT } else { LINE }));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    let displayed = if secret {
-        "•".repeat(input.text.chars().count())
-    } else {
-        input.text.clone()
-    };
-    let mut lines = displayed
-        .split('\n')
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if focused {
-        let prefix = &input.text[..input.cursor];
-        let line_index = prefix.matches('\n').count();
-        let col = prefix.rsplit('\n').next().unwrap_or("").chars().count();
-        if let Some(line) = lines.get_mut(line_index) {
-            let byte = line
-                .char_indices()
-                .nth(col)
-                .map(|(i, _)| i)
-                .unwrap_or(line.len());
-            line.insert(byte, '▏');
-        }
+    if inner.is_empty() {
+        return;
     }
-    let value = lines.join("\n");
-    let paragraph = Paragraph::new(value)
-        .style(style(if focused { TEXT } else { MUTED }))
-        .wrap(Wrap { trim: false });
-    let total = paragraph.line_count(inner.width);
-    let scroll = total
-        .saturating_sub(inner.height as usize)
+    // Hard-wrap editable values so the caret and viewport use the same cell widths.
+    let mut lines = vec![String::new()];
+    let mut column = 0;
+    let mut cursor_row = 0;
+    let mut push = |c: char| {
+        let width = c.width().unwrap_or(0);
+        if c == '\n' || column + width > inner.width as usize {
+            lines.push(String::new());
+            column = 0;
+        }
+        if c != '\n' {
+            lines.last_mut().unwrap().push(c);
+            column += width;
+        }
+        if c == '▏' {
+            cursor_row = lines.len() - 1;
+        }
+    };
+    for (byte, c) in input.text.char_indices() {
+        if focused && byte == input.cursor {
+            push('▏');
+        }
+        push(if secret { '•' } else { c });
+    }
+    if focused && input.cursor == input.text.len() {
+        push('▏');
+    }
+    let paragraph =
+        Paragraph::new(lines.join("\n")).style(style(if focused { TEXT } else { MUTED }));
+    let scroll = cursor_row
+        .saturating_sub(inner.height.saturating_sub(1) as usize)
         .min(u16::MAX as usize) as u16;
     f.render_widget(paragraph.scroll((scroll, 0)), inner);
 }

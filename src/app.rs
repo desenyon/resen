@@ -665,7 +665,10 @@ impl App {
                             .insert(&text.replace(['\n', '\t'], " "))
                     }
                 }
-                Modal::Palette { input, .. } => input.insert(&text.replace(['\n', '\t'], " ")),
+                Modal::Palette { input, selected } => {
+                    input.insert(&text.replace(['\n', '\t'], " "));
+                    *selected = 0;
+                }
                 Modal::Strategy { fields, focus } => {
                     fields[*focus].insert(&text.replace(['\n', '\t'], " "))
                 }
@@ -673,7 +676,8 @@ impl App {
                 _ => {}
             }
         } else if self.archive_search {
-            self.archive_filter.insert(text);
+            self.archive_filter.insert(&text.replace(['\n', '\t'], " "));
+            self.archive_selected = 0;
         }
     }
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -992,8 +996,8 @@ impl App {
                 KeyCode::Enter => {
                     if let Some(i) = Self::palette_matches(&input.text).get(*selected) {
                         self.command(COMMANDS[*i].1)?;
+                        retain = false;
                     }
-                    retain = false;
                 }
                 _ => {
                     input.key(key);
