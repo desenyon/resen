@@ -12,8 +12,8 @@ local `dist/` archives: their recorded revision may predate the tag.
 3. Create and push the matching annotated tag:
 
    ```sh
-   git tag -a v0.2.0 -m "Resen v0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.2.1 -m "Resen v0.2.1"
+   git push origin v0.2.1
    ```
 
 4. `Release artifacts` checks the tag/version agreement and builds five native
@@ -27,8 +27,8 @@ local `dist/` archives: their recorded revision may predate the tag.
    Review the successful jobs, notes and seven uploaded assets before publishing:
 
    ```sh
-   gh release view v0.2.0 --repo desenyon/resen
-   gh release edit v0.2.0 --repo desenyon/resen --draft=false --latest --verify-tag
+   gh release view v0.2.1 --repo desenyon/resen
+   gh release edit v0.2.1 --repo desenyon/resen --draft=false --latest --verify-tag
    ```
 
 6. `Verify public installation` downloads public assets on the same five native
@@ -38,7 +38,7 @@ local `dist/` archives: their recorded revision may predate the tag.
    it manually with the published tag:
 
    ```sh
-   gh workflow run install.yml --repo desenyon/resen -f version=v0.2.0
+   gh workflow run install.yml --repo desenyon/resen -f version=v0.2.1
    ```
 
 7. Verify the unauthenticated `releases/latest/download/install.sh` URL and run

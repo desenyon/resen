@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0
+## 0.2.1
 
 Resen's first downloadable release, including the complete terminal research desk
 and the UI review fixes.
@@ -21,6 +21,12 @@ and the UI review fixes.
 
 Model-backed research and vendor/LEAN connections require the user's credentials,
 local services and data entitlements. Demo fixtures remain explicitly synthetic.
+
+## 0.2.0 — unpublished candidate
+
+The Linux packaging gate rejected a shell condition under its older ShellCheck.
+No release was published. Version 0.2.1 uses an explicit condition and adds native
+preflight packaging without changing existing tags.
 
 ## 0.1.0
 

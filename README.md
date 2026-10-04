@@ -64,8 +64,8 @@ Archives and `SHA256SUMS` are available on [GitHub Releases](https://github.com/
 macOS binaries are unsigned and not notarized. Choose a directory or pin a version:
 
 ```sh
-curl -fsSL https://github.com/desenyon/resen/releases/download/v0.2.0/install.sh \
-  | sh -s -- --version v0.2.0 --dir "$HOME/.local/bin"
+curl -fsSL https://github.com/desenyon/resen/releases/download/v0.2.1/install.sh \
+  | sh -s -- --version v0.2.1 --dir "$HOME/.local/bin"
 ```
 
 <details>

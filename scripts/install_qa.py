@@ -14,8 +14,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "v0.2.0"
-PAYLOAD = b'#!/bin/sh\ncase "$1" in --version) echo "resen 0.2.0";; --help) echo "Resen help";; *) exit 1;; esac\n'
+VERSION = "v0.2.1"
+PAYLOAD = b'#!/bin/sh\ncase "$1" in --version) echo "resen 0.2.1";; --help) echo "Resen help";; *) exit 1;; esac\n'
 
 
 def archive(path, payload=PAYLOAD, names=None):
@@ -133,7 +133,7 @@ Path(args[args.index('--output') + 1]).write_bytes(source.read_bytes())
 
     def test_wrong_executable_version_preserves_previous_install(self):
         old = self.existing()
-        self.make_release(PAYLOAD.replace(b"0.2.0", b"0.1.0"))
+        self.make_release(PAYLOAD.replace(b"0.2.1", b"0.1.0"))
         self.run_install("--version", VERSION, success=False)
         self.assertEqual(old.read_bytes(), b"previous executable")
 

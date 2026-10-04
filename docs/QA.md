@@ -158,9 +158,9 @@ Native Terminal access was blocked by the computer-use tool; foreground terminal
 emulator acceptance is still outstanding. No live API acceptance is claimed.
 Runtime reports are retained locally under ignored `.qa/ui-audit/`.
 
-## Downloadable release verification — 0.2.0
+## Downloadable release verification — 0.2.1
 
-Local macOS arm64 formatting, Clippy, all 81 Rust tests and the optimized 0.2.0
+Local macOS arm64 formatting, Clippy, all 81 Rust tests and the optimized 0.2.1
 build pass. Fourteen installer failure-path tests pass, followed by installing
 the actual optimized executable into a directory containing spaces and running
 its version, help and offline study. The installer validates a checksum, streams
@@ -175,7 +175,7 @@ for each platform; configuring a job alone does not establish a passing result.
 
 ```sh
 python3 scripts/install_qa.py --binary target/release/resen
-python3 scripts/release_qa.py --version v0.2.0 --platform macos-arm64 --output /tmp/resen-qa
+python3 scripts/release_qa.py --version v0.2.1 --platform macos-arm64 --output /tmp/resen-qa
 ```
 
 See [release procedure](RELEASING.md) and
