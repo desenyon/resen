@@ -83,8 +83,10 @@ impl Input {
                 let prefix = &self.text[..self.cursor];
                 let trimmed = prefix.trim_end();
                 let end = trimmed
-                    .rfind(char::is_whitespace)
-                    .map(|i| i + 1)
+                    .char_indices()
+                    .rev()
+                    .find(|(_, c)| c.is_whitespace())
+                    .map(|(i, c)| i + c.len_utf8())
                     .unwrap_or(0);
                 self.text.drain(end..self.cursor);
                 self.cursor = end;

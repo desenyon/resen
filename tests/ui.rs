@@ -676,3 +676,39 @@ fn mouse_wheel_scrolls_help_without_scrolling_background() {
     assert!(matches!(app.modal, Some(Modal::Help { scroll: 3 })));
     assert_eq!(app.scroll, 0);
 }
+
+#[test]
+fn empty_research_pages_explain_the_next_action_at_minimum_size() {
+    let (_dir, mut app) = app();
+    for page in [Page::Research, Page::Sources, Page::Lab] {
+        app.page = page;
+        let output = draw(&mut app, 60, 18);
+        assert!(
+            output.contains(match page {
+                Page::Lab => "b  run",
+                _ => "n to",
+            }),
+            "next action hidden on {page:?}"
+        );
+        assert!(!output.contains("witha"));
+        assert!(!output.contains("hypothesisa"));
+    }
+    seed(&mut app);
+    app.current.as_mut().unwrap().sources.clear();
+    app.page = Page::Sources;
+    let output = draw(&mut app, 60, 18);
+    assert!(output.contains("No evidence was retrieved"));
+    assert!(output.contains("Press 2"));
+}
+
+#[test]
+fn deleting_word_after_unicode_whitespace_preserves_valid_text() {
+    for separator in [' ', '\u{2003}', '\u{3000}', '\n'] {
+        let mut input = Input::new(format!("研究{separator}word"));
+        input.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(input.text, format!("研究{separator}"));
+        assert_eq!(input.cursor, input.text.len());
+        input.key(key(KeyCode::Backspace));
+        assert_eq!(input.text, "研究");
+    }
+}

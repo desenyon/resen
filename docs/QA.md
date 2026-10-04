@@ -142,14 +142,14 @@ part of the application distribution.
 
 The [UI review and upgrade plan](UI_UPGRADE_PLAN.md) records the observed issues,
 implemented fixes, compact screenshots and remaining product improvements.
-Fresh local formatting, Clippy, all 79 tests and the optimized macOS arm64 build
-pass. This includes 19 new UI regressions, with actual content/interaction
+Fresh local formatting, Clippy, all 81 tests and the optimized macOS arm64 build
+pass. This includes 21 new UI regressions, with actual content/interaction
 assertions beyond the original crash-free rendering checks.
 
 Both committed executable QA suites pass again (24 PTY and 24 process checks).
-An additional isolated actual-executable walkthrough passes 30 checks, including
+An additional isolated actual-executable walkthrough passes 34 checks, including
 all setup stages, six pages, help scrolling, Unicode cursor visibility, pasted
-searches, form error dismissal/retry, studies, resize, cancellation and minimum-size
+searches, Unicode word deletion, form error dismissal/retry, studies, resize, cancellation and minimum-size
 exit. Terminal attributes, alternate screen and bracketed-paste mode restore.
 54 styled buffers were rendered for responsive and dialog inspection. Updated
 README screenshots and compact examples show labeled synthetic fixtures.

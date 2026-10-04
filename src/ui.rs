@@ -864,12 +864,35 @@ fn sources(f: &mut Frame, area: Rect, app: &mut App) {
     let Some(run) = &app.current else {
         empty(
             f,
-            rows[1],
+            Rect::new(
+                rows[1].x,
+                rows[1].y,
+                rows[1].width,
+                rows[1].height + rows[2].height,
+            ),
             "No source ledger yet.",
-            "Start research with n or open an archived run.",
+            "Press n to start research.\nOpen an archived run from page 5.",
         );
         return;
     };
+    if run.sources.is_empty() {
+        empty(
+            f,
+            Rect::new(
+                rows[1].x,
+                rows[1].y,
+                rows[1].width,
+                rows[1].height + rows[2].height,
+            ),
+            if app.busy() && run.status == "running" {
+                "Evidence collection in progress."
+            } else {
+                "No evidence was retrieved."
+            },
+            "Press 2 to inspect this run.\nPress n to ask another question.",
+        );
+        return;
+    }
     let entries = run.sources.iter().map(|s| {
         Row::new([
             format!("[{}]", s.id),
@@ -1415,6 +1438,20 @@ fn empty(f: &mut Frame, area: Rect, heading: &str, caption: &str) {
     let block = panel(" RESEN ");
     let inner = block.inner(area);
     f.render_widget(block, area);
+    if inner.height < 10 {
+        let mut lines = heading
+            .lines()
+            .map(|line| Line::styled(line.to_string(), bold(TEXT)))
+            .collect::<Vec<_>>();
+        lines.push(Line::raw(""));
+        lines.extend(
+            caption
+                .lines()
+                .map(|line| Line::styled(line.to_string(), style(MUTED))),
+        );
+        text(f, inset(inner, 1, 0), Text::from(lines), TEXT);
+        return;
+    }
     let a = inset(inner, 3, if inner.height > 12 { 3 } else { 1 });
     let lines = split(
         a,
@@ -1428,7 +1465,7 @@ fn empty(f: &mut Frame, area: Rect, heading: &str, caption: &str) {
     text(
         f,
         lines[1],
-        Line::styled(heading.to_string(), bold(TEXT)),
+        Text::styled(heading.to_string(), bold(TEXT)),
         TEXT,
     );
     text(f, lines[2], caption.to_string(), MUTED);
