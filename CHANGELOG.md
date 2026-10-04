@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
 Resen's first downloadable release, including the complete terminal research desk
 and the UI review fixes.
@@ -21,6 +21,12 @@ and the UI review fixes.
 
 Model-backed research and vendor/LEAN connections require the user's credentials,
 local services and data entitlements. Demo fixtures remain explicitly synthetic.
+
+## 0.2.1 — unpublished candidate
+
+All five native preflight builds passed. Package inspection then found a Windows
+Visual C++ runtime DLL dependency. Version 0.2.2 links the runtime statically and
+checks PE imports before packaging and during public installation QA.
 
 ## 0.2.0 — unpublished candidate
 

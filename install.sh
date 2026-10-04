@@ -5,7 +5,7 @@ set -eu
 version=latest
 install_dir=${HOME:?HOME must be set}/.local/bin
 usage() {
-    printf '%s\n' 'Usage: sh install.sh [--version v0.2.1] [--dir DIRECTORY]'
+    printf '%s\n' 'Usage: sh install.sh [--version v0.2.2] [--dir DIRECTORY]'
 }
 die() {
     printf 'resen installer: %s\n' "$1" >&2
@@ -20,7 +20,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 if [ "$version" != latest ]; then
-    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || die 'Use a release tag such as v0.2.1.'
+    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || die 'Use a release tag such as v0.2.2.'
 fi
 [ -n "$install_dir" ] || die 'Installation directory cannot be empty.'
 case "$install_dir" in /*) ;; *) install_dir=$PWD/$install_dir ;; esac

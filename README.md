@@ -58,14 +58,14 @@ settings and credentials stay in their existing state directory. Add
 | --- | --- |
 | macOS 13+, Apple Silicon or Intel | Shell installer or native `.tar.gz` |
 | Linux, ARM64 or x86_64 | Shell installer or static musl `.tar.gz` |
-| Windows, x86_64 | Extract `resen.exe` from the [release ZIP](https://github.com/desenyon/resen/releases/latest) and run `.\resen.exe --demo` |
+| Windows 10+, x86_64 | Extract `resen.exe` from the [release ZIP](https://github.com/desenyon/resen/releases/latest) and run `.\resen.exe --demo`; no separate Visual C++ runtime needed |
 
 Archives and `SHA256SUMS` are available on [GitHub Releases](https://github.com/desenyon/resen/releases/latest).
 macOS binaries are unsigned and not notarized. Choose a directory or pin a version:
 
 ```sh
-curl -fsSL https://github.com/desenyon/resen/releases/download/v0.2.1/install.sh \
-  | sh -s -- --version v0.2.1 --dir "$HOME/.local/bin"
+curl -fsSL https://github.com/desenyon/resen/releases/download/v0.2.2/install.sh \
+  | sh -s -- --version v0.2.2 --dir "$HOME/.local/bin"
 ```
 
 <details>
