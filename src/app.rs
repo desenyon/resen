@@ -445,6 +445,7 @@ pub struct App {
     pub toast: Option<(String, Instant, bool)>,
     pub tick: u64,
     pub quit: bool,
+    pub undersized: bool,
     pub job: Option<JoinHandle<()>>,
     retired_jobs: Vec<JoinHandle<()>>,
     pub job_started: Option<Instant>,
@@ -543,6 +544,7 @@ impl App {
             toast: None,
             tick: 0,
             quit: false,
+            undersized: false,
             job: None,
             retired_jobs: Vec::new(),
             job_started: None,
@@ -622,11 +624,20 @@ impl App {
                 self.handle_key(key)?
             }
             Event::Paste(text) => self.paste(&text),
-            Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_add(3),
-                MouseEventKind::ScrollUp => self.scroll = self.scroll.saturating_sub(3),
-                _ => {}
-            },
+            Event::Mouse(mouse) => {
+                let scroll = match &mut self.modal {
+                    Some(Modal::Help { scroll }) => Some(scroll),
+                    Some(_) => None,
+                    None => Some(&mut self.scroll),
+                };
+                if let Some(scroll) = scroll {
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => *scroll = scroll.saturating_add(3),
+                        MouseEventKind::ScrollUp => *scroll = scroll.saturating_sub(3),
+                        _ => {}
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -684,6 +695,15 @@ impl App {
     }
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if key.code == KeyCode::Esc && self.toast.as_ref().is_some_and(|(_, _, error)| *error) {
+            self.toast = None;
+            return Ok(());
+        }
+        if self.undersized && key.code == KeyCode::Char('q') {
+            self.cancel()?;
+            self.quit = true;
+            return Ok(());
+        }
         if ctrl && key.code == KeyCode::Char('c') {
             if self.busy() {
                 self.cancel()?;
@@ -981,6 +1001,8 @@ impl App {
                         self.secrets = secrets;
                         self.demo = false;
                         self.markets.clear();
+                        self.market_errors.clear();
+                        self.selected = 0;
                         self.notify(
                             "Your research desk is ready. Press r to load market data.",
                             false,

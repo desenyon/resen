@@ -496,3 +496,183 @@ fn help_scrolls_to_form_controls_and_back_at_small_sizes() {
         assert!(draw(&mut app, w, h).contains("Make the desk your own."));
     }
 }
+
+#[test]
+fn compact_navigation_names_current_page_and_palette() {
+    let (_dir, mut app) = app();
+    for page in Page::ALL {
+        app.page = page;
+        let output = draw(&mut app, 60, 18);
+        assert!(
+            output.contains(page.label()),
+            "{page:?} missing from compact header"
+        );
+        assert!(output.contains("ctrl+k"));
+    }
+}
+
+#[test]
+fn compact_archive_shows_question_and_explicit_demo_origin() {
+    let (_dir, mut app) = app();
+    seed(&mut app);
+    app.page = Page::Archive;
+    for (w, h) in [(60, 18), (80, 24)] {
+        let output = draw(&mut app, w, h);
+        assert!(output.contains("What makes this business durable?"));
+        assert!(output.contains("DEMO"));
+        assert!(output.contains("complete"));
+    }
+    app.archive_filter = Input::new("unmatched-query");
+    let output = draw(&mut app, 80, 24);
+    assert!(output.contains("No matching research"));
+    assert!(output.contains("/ to clear"));
+}
+
+#[test]
+fn minimum_source_view_shows_selection_and_origin() {
+    let (_dir, mut app) = app();
+    seed(&mut app);
+    app.page = Page::Sources;
+    let output = draw(&mut app, 60, 18);
+    assert!(output.contains("demo://"));
+    assert!(output.contains("Retrieved"));
+    assert!(output.contains("[1]"));
+}
+
+#[test]
+fn minimum_desk_chart_discloses_series_and_date() {
+    let (_dir, mut app) = app();
+    let output = draw(&mut app, 60, 18);
+    assert!(output.contains("SYNTHETIC SERIES"));
+    let date = app.markets[app.selected_symbol()]
+        .last()
+        .unwrap()
+        .date
+        .clone();
+    assert!(output.contains(&date));
+}
+
+#[test]
+fn compact_lab_keeps_metrics_and_assumptions_readable() {
+    let (_dir, mut app) = app();
+    app.backtest = Some(
+        resen::backtest::simulate(
+            &resen::data::demo_market("NVDA"),
+            resen::backtest::StrategyParams::default(),
+        )
+        .unwrap(),
+    );
+    app.page = Page::Lab;
+    for (w, h) in [(60, 18), (80, 24)] {
+        let output = draw(&mut app, w, h);
+        assert!(output.contains("Return"));
+        assert!(output.contains("Drawdown"));
+        assert!(output.contains("next-open"));
+        assert!(output.contains("not LEAN"));
+    }
+}
+
+#[tokio::test]
+async fn compact_busy_footer_keeps_cancellation_and_phase_visible() {
+    let (_dir, mut app) = app();
+    app.start_research(ResearchRequest {
+        kind: ResearchKind::Company,
+        symbols: vec!["AAPL".into()],
+        question: "Research".into(),
+        prior: None,
+    })
+    .unwrap();
+    app.phase = "Collecting evidence".into();
+    for page in Page::ALL {
+        app.page = page;
+        let output = draw(&mut app, 60, 18);
+        assert!(
+            output.contains("ctrl+c cancel"),
+            "cancel hidden on {page:?}"
+        );
+        assert!(
+            output.contains("Collecting evidence"),
+            "phase hidden on {page:?}"
+        );
+    }
+    app.cancel().unwrap();
+}
+
+#[test]
+fn wizard_replacing_watchlist_resets_asset_selection_and_errors() {
+    let (_dir, mut app) = app();
+    app.config.watchlist = ["NVDA", "AAPL", "MSFT", "SPY", "QQQ", "TSLA"]
+        .map(str::to_string)
+        .to_vec();
+    app.selected = 5;
+    app.market_errors
+        .insert("TSLA".into(), "Old source error".into());
+    app.settings(true);
+    if let Some(Modal::Settings(form)) = &mut app.modal {
+        form.step = 2;
+        form.fields[15].input = Input::new("NVDA");
+    }
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert_eq!(app.selected, 0);
+    assert!(app.market_errors.is_empty());
+    draw(&mut app, 144, 46);
+}
+
+#[test]
+fn undersized_terminal_quit_works_even_when_a_dialog_is_open() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Welcome);
+    draw(&mut app, 20, 8);
+    app.handle_key(key(KeyCode::Char('q'))).unwrap();
+    assert!(app.quit);
+}
+
+#[test]
+fn literal_caret_in_long_input_cannot_hide_the_real_start_cursor() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Import {
+        symbol: Input::new("AAPL"),
+        path: Input {
+            text: "START\n".to_string() + &"literal ▏ text\n".repeat(30),
+            cursor: 0,
+        },
+        focus: 1,
+    });
+    assert!(draw(&mut app, 80, 24).contains("▏START"));
+}
+
+#[test]
+fn dismissing_error_keeps_form_values_for_retry() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Import {
+        symbol: Input::new("AAPL"),
+        path: Input::new("/missing/history.csv"),
+        focus: 1,
+    });
+    let error = app.handle_key(key(KeyCode::Enter)).unwrap_err();
+    app.notify(format!("{error:#}"), true);
+    assert!(draw(&mut app, 60, 18).contains("esc dismiss"));
+    app.handle_key(key(KeyCode::Esc)).unwrap();
+    assert!(app.toast.is_none());
+    assert!(
+        matches!(&app.modal,Some(Modal::Import{path,..}) if path.text == "/missing/history.csv")
+    );
+    assert!(draw(&mut app, 60, 18).contains("enter import"));
+}
+
+#[test]
+fn mouse_wheel_scrolls_help_without_scrolling_background() {
+    let (_dir, mut app) = app();
+    app.modal = Some(Modal::Help { scroll: 0 });
+    app.handle_event(crossterm::event::Event::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::ScrollDown,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        },
+    ))
+    .unwrap();
+    assert!(matches!(app.modal, Some(Modal::Help { scroll: 3 })));
+    assert_eq!(app.scroll, 0);
+}

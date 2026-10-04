@@ -65,8 +65,9 @@ fn split(area: Rect, constraints: impl IntoIterator<Item = Constraint>) -> std::
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    app.undersized = area.width < 60 || area.height < 18;
     f.render_widget(Block::new().style(Style::new().bg(BG).fg(TEXT)), area);
-    if area.width < 60 || area.height < 18 {
+    if app.undersized {
         text(
             f,
             inset(area, 2, 1),
@@ -124,17 +125,22 @@ pub fn render(f: &mut Frame, app: &mut App) {
         f.render_widget(
             Paragraph::new(message.clone())
                 .style(style(if *error { RED } else { MINT }))
-                .block(panel(if *error { " Attention " } else { " Saved " }))
+                .block(panel(if *error {
+                    " Attention · esc dismiss "
+                } else {
+                    " Saved "
+                }))
                 .wrap(Wrap { trim: false }),
             toast,
         );
     }
 }
 fn header(f: &mut Frame, area: Rect, app: &App) {
+    let compact = area.width < 110;
     let row = Layout::horizontal([
-        Constraint::Length(24),
+        Constraint::Length(if compact { 16 } else { 24 }),
         Constraint::Min(0),
-        Constraint::Length(32),
+        Constraint::Length(if compact { 24 } else { 32 }),
     ])
     .split(inset(area, 2, 0));
     text(
@@ -143,7 +149,7 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
         Line::from(vec![
             Span::styled("◈  ", bold(MINT)),
             Span::styled("r e s e n", bold(TEXT)),
-            Span::styled("  /  01", style(DIM)),
+            Span::styled(if compact { "" } else { "  /  01" }, style(DIM)),
         ]),
         TEXT,
     );
@@ -151,8 +157,11 @@ fn header(f: &mut Frame, area: Rect, app: &App) {
         f,
         row[1],
         Line::from(vec![
-            Span::styled("FINANCIAL RESEARCH", style(MUTED)),
-            Span::styled("   /   ", style(DIM)),
+            Span::styled(
+                if compact { "" } else { "FINANCIAL RESEARCH" },
+                style(MUTED),
+            ),
+            Span::styled(if compact { "" } else { "   /   " }, style(DIM)),
             Span::styled(app.page.label(), style(TEXT)),
         ]),
         TEXT,
@@ -249,33 +258,32 @@ fn sidebar(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 fn footer(f: &mut Frame, area: Rect, app: &App) {
+    let compact = area.width < 110;
     let hint = match app.page {
-        Page::Desk => "n new research   r refresh   ↑↓ asset",
+        Page::Desk => "n research   r refresh   ↑↓ asset",
         Page::Research => "f follow-up   e export   ↑↓ scroll",
         Page::Sources => "↑↓ source   PgUp/PgDn excerpt   e export",
+        Page::Lab if compact => "b study   ←→ tabs   p Python   l LEAN   c cloud",
         Page::Lab => "b backtest   ←→ tabs   p Python   l run LEAN   c cloud",
         Page::Archive => "/ search   ↑↓ select   enter open",
         Page::Connections => "enter edit   t test model   PgUp/PgDn scroll",
     };
-    let parts =
-        Layout::horizontal([Constraint::Min(0), Constraint::Length(29)]).split(inset(area, 2, 0));
+    let inner = inset(area, 2, 0);
     text(
         f,
-        parts[0],
-        Line::from(vec![
-            Span::styled(hint, style(MUTED)),
-            Span::styled(
-                if app.busy() { "   ctrl+c cancel" } else { "" },
-                style(GOLD),
-            ),
-        ]),
-        MUTED,
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        if app.busy() {
+            format!("ctrl+c cancel   ◐ {}", app.phase)
+        } else {
+            hint.into()
+        },
+        if app.busy() { GOLD } else { MUTED },
     );
-    f.render_widget(
-        Paragraph::new("1–6 pages  ? help  q quit")
-            .style(style(DIM))
-            .alignment(Alignment::Right),
-        parts[1],
+    text(
+        f,
+        Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        "1–6 / tab pages   ctrl+k palette   ? help   q quit",
+        DIM,
     );
 }
 fn title(f: &mut Frame, area: Rect, eyebrow: &str, heading: &str, caption: &str) {
@@ -283,7 +291,7 @@ fn title(f: &mut Frame, area: Rect, eyebrow: &str, heading: &str, caption: &str)
         area,
         [
             Constraint::Length(1),
-            Constraint::Length(2),
+            Constraint::Length(if area.height <= 2 { 1 } else { 2 }),
             Constraint::Min(0),
         ],
     );
@@ -298,11 +306,24 @@ fn title(f: &mut Frame, area: Rect, eyebrow: &str, heading: &str, caption: &str)
 }
 fn desk(f: &mut Frame, area: Rect, app: &mut App) {
     let compact = area.height < 29;
+    let short = area.height < 20;
     let rows = split(
         area,
         [
-            Constraint::Length(if compact { 4 } else { 5 }),
-            Constraint::Length(if compact { 5 } else { 6 }),
+            Constraint::Length(if short {
+                2
+            } else if compact {
+                4
+            } else {
+                5
+            }),
+            Constraint::Length(if short {
+                3
+            } else if compact {
+                5
+            } else {
+                6
+            }),
             Constraint::Min(5),
             Constraint::Length(if compact { 0 } else { 6 }),
         ],
@@ -518,6 +539,36 @@ fn price_chart(f: &mut Frame, area: Rect, series: &MarketSeries) {
             Constraint::Length(1),
         ],
     );
+    if inner.height < 7 {
+        let prices: Vec<_> = series.bars.iter().map(|b| b.close).collect();
+        let min = prices.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = prices.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let count = (rows[1].width as usize).min(prices.len());
+        let values: Vec<_> = (0..count)
+            .map(|i| prices[i * prices.len().saturating_sub(1) / count.saturating_sub(1).max(1)])
+            .map(|p| ((p - min) / (max - min).max(f64::EPSILON) * 1000.0) as u64 + 1)
+            .collect();
+        text(
+            f,
+            rows[0],
+            format!(
+                "{} · {}",
+                if series.demo {
+                    "SYNTHETIC SERIES"
+                } else {
+                    "DAILY CLOSE"
+                },
+                series.last().map(|b| b.date.as_str()).unwrap_or("")
+            ),
+            DIM,
+        );
+        f.render_widget(
+            Sparkline::default().data(&values).style(style(MINT)),
+            rows[1],
+        );
+        text(f, rows[2], series.source.clone(), DIM);
+        return;
+    }
     text(
         f,
         rows[0],
@@ -787,13 +838,18 @@ fn research_rail(f: &mut Frame, area: Rect, app: &App) {
     text(f, inner, Text::from(lines), TEXT);
 }
 fn sources(f: &mut Frame, area: Rect, app: &mut App) {
+    let compact = area.height < 20;
     let source_count = app.current.as_ref().map_or(0, |run| run.sources.len());
-    let table_height = (source_count.saturating_add(4).min(9) as u16)
-        .min(area.height.saturating_sub(10).clamp(4, 9));
+    let table_height = if compact {
+        3
+    } else {
+        (source_count.saturating_add(4).min(9) as u16)
+            .min(area.height.saturating_sub(10).clamp(4, 9))
+    };
     let rows = split(
         area,
         [
-            Constraint::Length(4),
+            Constraint::Length(if compact { 2 } else { 4 }),
             Constraint::Length(table_height),
             Constraint::Min(0),
         ],
@@ -833,18 +889,22 @@ fn sources(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Min(10),
         ],
     )
-    .header(
-        Row::new(["ID", "SOURCE", "ORIGIN", "AS OF"])
-            .style(style(DIM))
-            .bottom_margin(1),
-    )
     .block(panel(" COLLECTED EVIDENCE "))
     .row_highlight_style(Style::new().fg(MINT).bg(SELECT))
     .highlight_symbol("▎");
+    let table = if compact {
+        table
+    } else {
+        table.header(
+            Row::new(["ID", "SOURCE", "ORIGIN", "AS OF"])
+                .style(style(DIM))
+                .bottom_margin(1),
+        )
+    };
     f.render_stateful_widget(table, rows[1], &mut state);
     if let Some(s) = run.sources.get(app.source_selected) {
         let content = format!(
-            "# {}\n\n{}\nRetrieved {}\n\n{}",
+            "# {}\n{}\nRetrieved {}\n\n{}",
             s.title,
             s.url,
             s.retrieved_at.to_rfc3339(),
@@ -857,10 +917,11 @@ fn sources(f: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 fn archive(f: &mut Frame, area: Rect, app: &mut App) {
+    let compact = area.width < 100;
     let rows = split(
         area,
         [
-            Constraint::Length(4),
+            Constraint::Length(if area.height < 20 { 2 } else { 4 }),
             Constraint::Length(3),
             Constraint::Min(0),
         ],
@@ -888,11 +949,51 @@ fn archive(f: &mut Frame, area: Rect, app: &mut App) {
     );
     let indices = app.filtered_runs();
     if indices.is_empty() {
-        empty(
+        let block = panel(" RESEARCH HISTORY ");
+        let inner = block.inner(rows[2]);
+        f.render_widget(block, rows[2]);
+        text(
             f,
+            inner,
+            if app.archive_filter.text.is_empty() {
+                "No research yet.\nPress n to start a question."
+            } else {
+                "No matching research.\nPress / to clear the filter."
+            },
+            MUTED,
+        );
+        return;
+    }
+    if compact {
+        let entries = indices
+            .iter()
+            .map(|i| {
+                let run = &app.runs[*i];
+                ListItem::new(Text::from(vec![
+                    Line::from(vec![
+                        Span::styled(run.request.symbols.join(", "), bold(TEXT)),
+                        Span::styled(
+                            format!(
+                                "  {}  {}",
+                                run.status,
+                                if run.demo { "DEMO" } else { "RESEARCH" }
+                            ),
+                            style(if run.demo { GOLD } else { MUTED }),
+                        ),
+                    ]),
+                    Line::styled(run.request.question.replace('\n', " "), style(MUTED)),
+                    Line::raw(""),
+                ]))
+            })
+            .collect::<Vec<_>>();
+        let mut state = ListState::default().with_selected(Some(app.archive_selected));
+        f.render_stateful_widget(
+            List::new(entries)
+                .block(panel(" RESEARCH HISTORY "))
+                .highlight_style(Style::new().fg(MINT).bg(SELECT))
+                .highlight_symbol("▎ "),
             rows[2],
-            "Room for your next insight.",
-            "Press n to start research. Your results will appear here.",
+            &mut state,
         );
         return;
     }
@@ -1062,11 +1163,12 @@ fn connections(f: &mut Frame, area: Rect, app: &mut App) {
     scroll_text(f, inner, Text::from(lines), app);
 }
 fn lab(f: &mut Frame, area: Rect, app: &mut App) {
+    let short = area.height < 20;
     let rows = split(
         area,
         [
-            Constraint::Length(4),
-            Constraint::Length(2),
+            Constraint::Length(if short { 2 } else { 4 }),
+            Constraint::Length(if short { 1 } else { 2 }),
             Constraint::Min(0),
         ],
     );
@@ -1104,6 +1206,33 @@ fn lab(f: &mut Frame, area: Rect, app: &mut App) {
     );
     if app.lab_tab == 0 {
         if let Some(result) = &app.backtest {
+            if rows[2].height < 18 {
+                let block = panel(if result.demo {
+                    " HISTORICAL STUDY / DEMO "
+                } else {
+                    " HISTORICAL STUDY "
+                });
+                let inner = block.inner(rows[2]);
+                f.render_widget(block, rows[2]);
+                let value = format!(
+                    "Return {:+.2}% · Drawdown {:.2}%\nSharpe {} · Trades {} · Fees {:.0}\nSMA {}/{} · next-open · {:.1} bps each way\nBuy & hold {:+.2}% · long/cash, fractional shares\nResearch simulation, not LEAN.\nNo dividends/tax; daily adjustments may bias results.\n{}\nb change parameters · JSON saved in exports.",
+                    result.total_return * 100.0,
+                    result.max_drawdown * 100.0,
+                    result
+                        .sharpe
+                        .map(|v| format!("{v:.2} (252, RF 0)"))
+                        .unwrap_or_else(|| "undefined".into()),
+                    result.trades,
+                    result.fees,
+                    result.params.fast,
+                    result.params.slow,
+                    result.params.cost_bps,
+                    result.benchmark_return * 100.0,
+                    result.source,
+                );
+                scroll_text(f, inner, Text::from(value), app);
+                return;
+            }
             let layout = split(
                 rows[2],
                 [
@@ -1757,18 +1886,16 @@ fn input_widget(
             lines.last_mut().unwrap().push(c);
             column += width;
         }
-        if c == '▏' {
-            cursor_row = lines.len() - 1;
-        }
+        lines.len() - 1
     };
     for (byte, c) in input.text.char_indices() {
         if focused && byte == input.cursor {
-            push('▏');
+            cursor_row = push('▏');
         }
         push(if secret { '•' } else { c });
     }
     if focused && input.cursor == input.text.len() {
-        push('▏');
+        cursor_row = push('▏');
     }
     let paragraph =
         Paragraph::new(lines.join("\n")).style(style(if focused { TEXT } else { MUTED }));
