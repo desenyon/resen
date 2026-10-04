@@ -6,22 +6,29 @@ permissions:
   contents: read
 jobs:
   package:
+    timeout-minutes: 35
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             name: linux-x86_64
-            binary: resen
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            target: aarch64-unknown-linux-musl
+          - os: macos-15-intel
+            name: macos-x86_64
+            target: x86_64-apple-darwin
+          - os: macos-15
             name: macos-arm64
-            binary: resen
             target: aarch64-apple-darwin
-          - os: windows-latest
+          - os: windows-2025
             name: windows-x86_64
-            binary: resen.exe
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -29,35 +36,76 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo test --locked
+          components: rustfmt, clippy
+      - name: Verify tag and manifest version
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          assert os.environ['GITHUB_REF_NAME'] == f'v{version}', 'Tag must match Cargo.toml'
+          assert Path(f'docs/releases/v{version}.md').is_file(), 'Release notes are required'
+          PY
+      - if: runner.os == 'Linux'
+        name: Install native musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools shellcheck
+          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+          shellcheck install.sh
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked --target ${{ matrix.target }} -- -D warnings
+      - run: cargo test --locked --target ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package native archive
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/resen"
+          if [ "${{ runner.os }}" = 'Windows' ]; then binary="$binary.exe"; fi
+          python3 scripts/package_release.py --binary "$binary" --platform '${{ matrix.name }}' --output dist
+      - if: runner.os != 'Windows'
+        name: Test installer and actual executable
+        run: |
+          python3 scripts/install_qa.py --binary target/${{ matrix.target }}/release/resen
+          python3 scripts/pty_qa.py --binary target/${{ matrix.target }}/release/resen
+          python3 scripts/process_qa.py --binary target/${{ matrix.target }}/release/resen
+      - if: runner.os == 'Linux'
+        name: Verify static binary on Alpine and Debian
+        run: |
+          file target/${{ matrix.target }}/release/resen
+          for image in alpine:3.22 debian:bookworm-slim; do
+            docker run --rm -v "$PWD/target/${{ matrix.target }}/release:/release:ro" "$image" /release/resen --version
+            docker run --rm -v "$PWD/target/${{ matrix.target }}/release:/release:ro" "$image" /release/resen --demo --data-dir /tmp/resen backtest --symbol NVDA >/dev/null
+          done
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: resen-${{ matrix.name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
           if-no-files-found: error
   publish:
     needs: package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8.0.1
         with:
           path: artifacts
-      - name: Package and checksum
-        shell: bash
-        run: |
-          mkdir dist
-          for folder in artifacts/*; do
-            name=$(basename "$folder")
-            chmod +x "$folder"/resen* || true
-            tar -czf "dist/$name.tar.gz" -C "$folder" .
-          done
-          cd dist
-          sha256sum *.tar.gz > SHA256SUMS
+      - name: Verify archives and collect checksums
+        run: python3 scripts/package_release.py --collect artifacts --output dist
       - uses: softprops/action-gh-release@v3.0.3
         with:
           files: dist/*
-          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body_path: docs/releases/${{ github.ref_name }}.md
+          name: Resen ${{ github.ref_name }}
           draft: true

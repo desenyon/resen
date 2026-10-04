@@ -23,6 +23,8 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --release --locked
       - if: runner.os != 'Windows'
+        run: python3 scripts/install_qa.py --binary target/release/resen
+      - if: runner.os != 'Windows'
         run: python3 scripts/pty_qa.py --binary target/release/resen
       - if: runner.os != 'Windows'
         run: python3 scripts/process_qa.py --binary target/release/resen
