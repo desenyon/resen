@@ -171,6 +171,10 @@ not autonomous access to your development workspace.
 
 ## Keyboard
 
+Help scrolls with the keyboard or mouse wheel. Press **Esc** to dismiss an error
+notice and keep the current form ready for retry. Compact layouts keep the
+focused field, submission controls, job phase and cancellation visible.
+
 | Key | Action |
 | --- | --- |
 | 1–6 / Tab | Navigate pages |
@@ -181,10 +185,10 @@ not autonomous access to your development workspace.
 | Enter in question | Add a line |
 | `r` on desk | Refresh daily history |
 | ↑↓ / `j` / `k` | Select assets, sources or runs; scroll reports |
-| PgUp / PgDn / Home / End | Navigate long reports |
+| PgUp / PgDn / Home / End | Navigate long reports and the help dialog |
 | `f` on research | Follow up |
 | `e` on research/sources | Export Markdown and JSON |
-| `/` in archive | Filter runs |
+| `/` in archive | Filter runs; press again to clear the filter |
 | Enter / `s` in connections | Edit connections |
 | `t` in connections | Test model |
 | `b` in lab | Set parameters and run a historical study |
@@ -275,6 +279,7 @@ Python's standard library. CI is configured for macOS, Linux and Windows; releas
 packaging is defined for tagged versions, and CI includes a RustSec dependency
 audit. The archive loads the most recent 200 runs; older stored IDs remain
 available to the export command. See [UI research](docs/UI_RESEARCH.md),
-[architecture](docs/ARCHITECTURE.md), and [QA evidence](docs/QA.md).
+[architecture](docs/ARCHITECTURE.md), [QA evidence](docs/QA.md), and the
+[UI review, completed fixes and next improvements](docs/UI_UPGRADE_PLAN.md).
 
 [MIT](LICENSE). Built with [Ratatui](https://ratatui.rs/) and Rust.
