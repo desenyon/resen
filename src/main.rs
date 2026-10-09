@@ -97,8 +97,23 @@ enum Commands {
         #[arg(long, value_enum, default_value = "company")]
         kind: Kind,
     },
-    /// List saved research runs.
-    History,
+    /// Query saved research runs across the full archive.
+    History {
+        #[arg(long, default_value = "")]
+        search: String,
+        #[arg(long, value_parser = ["running", "complete", "failed", "cancelled", "interrupted"])]
+        status: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        /// Print machine-readable results with counts and pagination metadata.
+        #[arg(long)]
+        json: bool,
+        /// List unreadable record IDs and diagnostics; original JSON is retained.
+        #[arg(long, conflicts_with_all = ["search", "status", "limit", "offset"])]
+        issues: bool,
+    },
     /// Export a saved run with its provenance.
     Export {
         id: String,
@@ -184,7 +199,7 @@ async fn execute_cli(cli: Cli) -> Result<()> {
                     } else {
                         "run resen setup"
                     },
-                    app.runs.len()
+                    app.archive_total
                 );
                 app.config.validate()?;
                 println!("Configuration: valid");
@@ -236,19 +251,20 @@ async fn execute_cli(cli: Cli) -> Result<()> {
                     "Research question cannot be blank"
                 );
                 app.start_research(request)?;
+                let mut maintenance = tokio::time::interval(std::time::Duration::from_millis(250));
                 let interrupt = tokio::signal::ctrl_c();
                 tokio::pin!(interrupt);
                 loop {
                     tokio::select! {
                         Some(event) = app.rx.recv() => {
-                            let done = matches!(event.kind(), JobEvent::Research(e) if matches!(**e, ResearchEvent::Finished(_)));
                             if let JobEvent::Research(e) = event.kind()
                                 && let ResearchEvent::Phase(phase) = &**e {
                                 eprintln!("resen: {phase}");
                             }
                             app.apply_job(event)?;
-                            if done { break; }
+                            if !app.busy() { break; }
                         }
+                        _ = maintenance.tick() => app.maintain_jobs()?,
                         _ = &mut interrupt => {
                             let result = app.cancel();
                             app.finish_cancelled().await;
@@ -268,16 +284,55 @@ async fn execute_cli(cli: Cli) -> Result<()> {
                 );
                 Ok(())
             }
-            Some(Commands::History) => {
-                for run in &app.runs {
-                    println!(
-                        "{}  {}  {:11}  {}  {}{}",
-                        run.id,
-                        run.created_at.format("%Y-%m-%d %H:%M"),
-                        run.status,
-                        run.request.kind.label(),
-                        run.request.symbols.join(","),
-                        if run.demo { "  DEMO" } else { "" }
+            Some(Commands::History {
+                search,
+                status,
+                limit,
+                offset,
+                json,
+                issues,
+            }) => {
+                if issues {
+                    let issues = app.store.issues()?;
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&issues)?);
+                    } else {
+                        for issue in issues {
+                            println!(
+                                "{}  {}",
+                                resen::clean_text(&issue.id),
+                                resen::clean_text(&issue.reason)
+                            );
+                        }
+                    }
+                    return Ok(());
+                }
+                let page = app.store.query(&resen::store::ArchiveQuery {
+                    search,
+                    status,
+                    limit,
+                    offset,
+                })?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&page)?);
+                } else {
+                    for run in &page.runs {
+                        println!(
+                            "{}  {}  {:11}  {}  {}{}",
+                            resen::clean_text(&run.id),
+                            run.created_at.format("%Y-%m-%d %H:%M"),
+                            resen::clean_text(&run.status),
+                            run.request.kind.label(),
+                            resen::clean_text(&run.request.symbols.join(",")),
+                            if run.demo { "  DEMO" } else { "" }
+                        );
+                    }
+                    eprintln!(
+                        "resen: {} of {} matching runs (offset {}); {} unreadable. Use history --issues for diagnostics.",
+                        page.runs.len(),
+                        page.total,
+                        page.offset,
+                        page.unreadable
                     );
                 }
                 Ok(())
@@ -373,6 +428,7 @@ async fn execute_cli(cli: Cli) -> Result<()> {
                 run.warnings
                     .push("Sample research; no live sources retrieved.".into());
                 app.runs.insert(0, run.clone());
+                app.archive_total += 1;
                 app.current = Some(run);
                 app.phase = "Research complete".into();
                 match page {
@@ -437,11 +493,12 @@ async fn execute_cli(cli: Cli) -> Result<()> {
                 loop {
                     tokio::select! {
                         Some(event) = app.rx.recv() => {
-                            let done = matches!(event.kind(), JobEvent::LeanDone(_));
+                            let stopped = matches!(event.kind(), JobEvent::Stopped);
                             if let JobEvent::LeanLog(line) = event.kind() { eprintln!("{}", app.secrets.redact(line)); }
                             if let JobEvent::LeanDone(Err(error)) = event.kind() { anyhow::bail!("{error}"); }
                             app.apply_job(event)?;
-                            if done { break; }
+                            anyhow::ensure!(!stopped, "LEAN worker stopped unexpectedly");
+                            if !app.busy() { break; }
                         }
                         _ = &mut interrupt => {
                             let result = app.cancel();
@@ -518,17 +575,23 @@ async fn run_tui(app: &mut App) -> Result<()> {
         "Interactive mode needs a terminal. Use --help for headless commands."
     );
     let _guard = TerminalGuard;
+    // Worker panics are supervised. Only a foreground panic owns terminal teardown.
+    let previous = std::panic::take_hook();
+    let ui_thread = std::thread::current().id();
     let mut terminal = ratatui::try_init()?;
     execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
-    let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(
-            std::io::stdout(),
-            DisableMouseCapture,
-            DisableBracketedPaste
-        );
-        ratatui::restore();
-        previous(info);
+        if std::thread::current().id() == ui_thread {
+            let _ = execute!(
+                std::io::stdout(),
+                DisableMouseCapture,
+                DisableBracketedPaste
+            );
+            ratatui::restore();
+            previous(info);
+        }
+        // Background failures surface through a generic, generation-tagged event;
+        // panic payloads may contain private provider data and are not printed.
     }));
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(125));
@@ -545,7 +608,7 @@ async fn run_tui(app: &mut App) -> Result<()> {
         tokio::select! {
             Some(event)=events.next()=>match event{Ok(event)=>if let Err(error)=app.handle_event(event){app.notify(format!("{error:#}"),true);},Err(error)=>return Err(error.into())},
             Some(event)=app.rx.recv()=>if let Err(error)=app.apply_job(event){app.notify(format!("{error:#}"),true);},
-            _=tick.tick()=>app.on_tick(),
+            _=tick.tick()=>{app.on_tick(); if let Err(error)=app.maintain_jobs(){app.notify(format!("{error:#}"),true);}},
             _=&mut interrupt=>{app.cancel()?;app.quit=true;},
             _=async{#[cfg(unix)]{terminate.recv().await;}#[cfg(not(unix))]{std::future::pending::<()>().await;}}=>{app.cancel()?;app.quit=true;},
         }

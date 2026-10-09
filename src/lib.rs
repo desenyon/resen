@@ -3,6 +3,7 @@ pub mod backtest;
 pub mod config;
 pub mod data;
 pub mod domain;
+pub mod jobs;
 pub mod process;
 pub mod provider;
 pub mod research;

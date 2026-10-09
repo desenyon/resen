@@ -32,7 +32,8 @@ fn seed(app: &mut App) {
     let mut source = resen::data::market_source(&resen::data::demo_market("NVDA"));
     source.id = 1;
     run.sources.push(source);
-    app.runs.push(run.clone());
+    app.store.save(&run).unwrap();
+    app.refresh_archive().unwrap();
     app.current = Some(run);
 }
 fn draw(app: &mut App, width: u16, height: u16) -> String {

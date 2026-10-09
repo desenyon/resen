@@ -6,7 +6,7 @@ use crate::{
         MarketSeries, ProviderKind, ResearchKind, ResearchRequest, ResearchRun, parse_symbols,
     },
     research::{self, ResearchEvent},
-    store::Store,
+    store::{ARCHIVE_PAGE_SIZE, ArchiveQuery, Store},
 };
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
@@ -392,6 +392,7 @@ pub enum JobEvent {
         event: Box<JobEvent>,
     },
     Research(Box<ResearchEvent>),
+    Stopped,
     Market(Vec<(String, Result<MarketSeries, String>)>),
     Checked(Result<String, String>),
     LeanLog(String),
@@ -436,6 +437,9 @@ pub struct App {
     pub archive_selected: usize,
     pub archive_filter: Input,
     pub archive_search: bool,
+    pub archive_offset: usize,
+    pub archive_total: usize,
+    pub archive_unreadable: usize,
     pub runs: Vec<ResearchRun>,
     pub current: Option<ResearchRun>,
     pub phase: String,
@@ -452,6 +456,7 @@ pub struct App {
     retired_jobs: Vec<JoinHandle<()>>,
     pub job_started: Option<Instant>,
     job_generation: u64,
+    checkpoint: crate::jobs::Checkpoint,
     pub tx: mpsc::UnboundedSender<JobEvent>,
     pub rx: mpsc::UnboundedReceiver<JobEvent>,
 }
@@ -502,7 +507,8 @@ impl App {
         }
         let store = Store::open(&paths)?;
         store.recover_interrupted()?;
-        let runs = store.list()?;
+        let archive = store.query(&ArchiveQuery::default())?;
+        let runs = archive.runs;
         let (tx, rx) = mpsc::unbounded_channel();
         let modal = if !demo && !config.setup_complete {
             Some(Modal::Welcome)
@@ -535,6 +541,9 @@ impl App {
             archive_selected: 0,
             archive_filter: Input::default(),
             archive_search: false,
+            archive_offset: 0,
+            archive_total: archive.total,
+            archive_unreadable: archive.unreadable,
             runs,
             current: None,
             phase: "Ready for a question".into(),
@@ -543,7 +552,8 @@ impl App {
             strategy_params: StrategyParams::default(),
             lean_stats: BTreeMap::new(),
             lab_tab: 0,
-            toast: None,
+            toast: (archive.unreadable > 0).then(|| (
+                format!("{} unreadable archive records preserved. Run resen history --issues for diagnostics.", archive.unreadable), Instant::now(), true)),
             tick: 0,
             quit: false,
             undersized: false,
@@ -551,6 +561,7 @@ impl App {
             retired_jobs: Vec::new(),
             job_started: None,
             job_generation: 0,
+            checkpoint: crate::jobs::Checkpoint::default(),
             tx,
             rx,
         })
@@ -576,6 +587,18 @@ impl App {
             .map(|(i, _)| i)
             .collect()
     }
+    pub fn refresh_archive(&mut self) -> Result<()> {
+        let page = self.store.query(&ArchiveQuery {
+            search: self.archive_filter.text.clone(),
+            offset: self.archive_offset,
+            ..Default::default()
+        })?;
+        self.archive_total = page.total;
+        self.archive_unreadable = page.unreadable;
+        self.runs = page.runs;
+        self.archive_selected = self.archive_selected.min(self.runs.len().saturating_sub(1));
+        Ok(())
+    }
     pub fn filtered_runs(&self) -> Vec<usize> {
         let q = self.archive_filter.text.to_lowercase();
         self.runs
@@ -583,10 +606,14 @@ impl App {
             .enumerate()
             .filter(|(_, r)| {
                 format!(
-                    "{} {} {}",
+                    "{} {} {} {} {} {} {}",
+                    r.id,
                     r.request.question,
                     r.request.symbols.join(" "),
-                    r.request.kind.label()
+                    r.request.kind.label(),
+                    r.provider,
+                    r.model,
+                    r.status
                 )
                 .to_lowercase()
                 .contains(&q)
@@ -625,7 +652,13 @@ impl App {
             Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
                 self.handle_key(key)?
             }
-            Event::Paste(text) => self.paste(&text),
+            Event::Paste(text) => {
+                self.paste(&text);
+                if self.archive_search && self.modal.is_none() {
+                    self.archive_offset = 0;
+                    self.refresh_archive()?;
+                }
+            }
             Event::Mouse(mouse) => {
                 let scroll = match &mut self.modal {
                     Some(Modal::Help { scroll }) => Some(scroll),
@@ -723,6 +756,8 @@ impl App {
                 _ => {
                     self.archive_filter.key(key);
                     self.archive_selected = 0;
+                    self.archive_offset = 0;
+                    self.refresh_archive()?;
                 }
             }
             return Ok(());
@@ -768,6 +803,9 @@ impl App {
             KeyCode::Char('/') if self.page == Page::Archive => {
                 self.archive_search = true;
                 self.archive_filter = Input::default();
+                self.archive_offset = 0;
+                self.archive_selected = 0;
+                self.refresh_archive()?;
             }
             KeyCode::Char('s') if self.page == Page::Connections => self.settings(false),
             KeyCode::Char('t') if self.page == Page::Connections => {
@@ -785,6 +823,29 @@ impl App {
             KeyCode::Char('p') if self.page == Page::Lab => self.create_lean("python")?,
             KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
+            KeyCode::PageDown if self.page == Page::Archive => {
+                if self.archive_offset + self.runs.len() < self.archive_total {
+                    self.archive_offset += ARCHIVE_PAGE_SIZE;
+                    self.archive_selected = 0;
+                    self.refresh_archive()?;
+                }
+            }
+            KeyCode::PageUp if self.page == Page::Archive => {
+                self.archive_offset = self.archive_offset.saturating_sub(ARCHIVE_PAGE_SIZE);
+                self.archive_selected = 0;
+                self.refresh_archive()?;
+            }
+            KeyCode::Home if self.page == Page::Archive => {
+                self.archive_offset = 0;
+                self.archive_selected = 0;
+                self.refresh_archive()?;
+            }
+            KeyCode::End if self.page == Page::Archive => {
+                self.archive_offset =
+                    self.archive_total.saturating_sub(1) / ARCHIVE_PAGE_SIZE * ARCHIVE_PAGE_SIZE;
+                self.archive_selected = 0;
+                self.refresh_archive()?;
+            }
             KeyCode::PageDown => self.scroll = self.scroll.saturating_add(12),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(12),
             KeyCode::Home => self.scroll = 0,
@@ -1111,6 +1172,10 @@ impl App {
     }
     fn ensure_idle(&self) -> Result<()> {
         anyhow::ensure!(!self.busy(), "A job is already running. Ctrl+C cancels it.");
+        anyhow::ensure!(
+            !self.checkpoint.dirty(),
+            "Research has unsaved changes. Resolve the archive write error before starting another job."
+        );
         Ok(())
     }
     fn job_sender(&mut self) -> JobSender {
@@ -1119,6 +1184,53 @@ impl App {
             tx: self.tx.clone(),
             generation: self.job_generation,
         }
+    }
+    fn spawn_job(
+        &mut self,
+        tx: JobSender,
+        task: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        self.retired_jobs.retain(|job| !job.is_finished());
+        self.job_started = Some(Instant::now());
+        self.job = Some(tokio::spawn(crate::jobs::supervise(task, tx)));
+    }
+    fn finish_job(&mut self) {
+        if let Some(job) = self.job.take() {
+            self.retired_jobs.push(job);
+        }
+        self.job_started = None;
+        self.job_generation += 1;
+    }
+    fn flush_research(&mut self, force: bool) -> Result<()> {
+        if self.checkpoint.dirty() && (force || self.checkpoint.due()) {
+            if let Some(run) = &mut self.current {
+                if run.status == "running" {
+                    run.elapsed_ms = self
+                        .job_started
+                        .map(|start| start.elapsed().as_millis() as u64)
+                        .unwrap_or(0);
+                }
+                self.store.save(run)?;
+            }
+            // A failed write leaves this dirty, so the next maintenance call retries.
+            self.checkpoint.saved();
+        }
+        Ok(())
+    }
+    /// Called on a wall-clock timer by both frontends, even when a stream stalls.
+    pub fn maintain_jobs(&mut self) -> Result<()> {
+        let finishing = self.checkpoint.dirty()
+            && self
+                .current
+                .as_ref()
+                .is_some_and(|run| run.status != "running");
+        self.flush_research(finishing)?;
+        if finishing {
+            self.finish_job();
+            self.refresh_archive()?;
+        }
+        self.retired_jobs.retain(|job| !job.is_finished());
+        Ok(())
     }
     pub fn start_research(&mut self, mut request: ResearchRequest) -> Result<()> {
         self.ensure_idle()?;
@@ -1133,6 +1245,13 @@ impl App {
             "Keep research questions under 16,000 bytes."
         );
         anyhow::ensure!(request.symbols.len() <= 6, "Research up to six symbols.");
+        for symbol in &request.symbols {
+            let parsed = parse_symbols(symbol)?;
+            anyhow::ensure!(
+                parsed.len() == 1 && parsed[0] == *symbol,
+                "Research symbols must be normalized, nonempty symbols."
+            );
+        }
         let run = ResearchRun::new(
             request,
             if self.demo {
@@ -1149,6 +1268,7 @@ impl App {
         );
         self.store.save(&run)?;
         self.current = Some(run.clone());
+        self.checkpoint.saved();
         self.phase = "Starting research".into();
         self.events.clear();
         self.page = Page::Research;
@@ -1158,15 +1278,15 @@ impl App {
         let secrets = self.secrets.clone();
         let paths = self.paths.clone();
         let tx = self.job_sender();
-        self.job_started = Some(Instant::now());
-        self.job = Some(tokio::spawn(async move {
+        let supervisor = tx.clone();
+        self.spawn_job(supervisor, async move {
             let (research_tx, mut rx) = mpsc::unbounded_channel();
             let task = research::run(run, config, secrets, &paths, research_tx);
             tokio::pin!(task);
             loop {
                 tokio::select! {result=&mut task=>{while let Ok(event)=rx.try_recv() {let _=tx.send(JobEvent::Research(Box::new(event)));}let _=result;break;},Some(event)=rx.recv()=>{let _=tx.send(JobEvent::Research(Box::new(event)));}}
             }
-        }));
+        });
         Ok(())
     }
     pub fn refresh(&mut self) -> Result<()> {
@@ -1187,8 +1307,8 @@ impl App {
         let secrets = self.secrets.clone();
         let tx = self.job_sender();
         self.phase = "Loading daily market history".into();
-        self.job_started = Some(Instant::now());
-        self.job = Some(tokio::spawn(async move {
+        let supervisor = tx.clone();
+        self.spawn_job(supervisor, async move {
             let mut results = vec![];
             for symbol in symbols {
                 let result = client
@@ -1198,7 +1318,7 @@ impl App {
                 results.push((symbol, result));
             }
             let _ = tx.send(JobEvent::Market(results));
-        }));
+        });
         Ok(())
     }
     pub fn check_connection(&mut self, config: Config, secrets: Secrets) -> Result<()> {
@@ -1212,20 +1332,27 @@ impl App {
         }
         let tx = self.job_sender();
         self.phase = "Checking model connection".into();
-        self.job_started = Some(Instant::now());
-        self.job = Some(tokio::spawn(async move {
+        let supervisor = tx.clone();
+        self.spawn_job(supervisor, async move {
             let result = crate::provider::check(&config, &secrets)
                 .await
                 .map_err(|e| secrets.redact(&format!("{e:#}")));
             let _ = tx.send(JobEvent::Checked(result));
-        }));
+        });
         Ok(())
     }
     pub fn cancel(&mut self) -> Result<()> {
-        self.job_generation += 1;
         if let Some(job) = self.job.take() {
             job.abort();
             self.retired_jobs.push(job);
+        }
+        // Preserve accepted events that were queued before cancellation. After this
+        // drain, generation invalidation rejects anything racing the worker abort.
+        let mut error = None;
+        while let Ok(event) = self.rx.try_recv() {
+            if let Err(failure) = self.apply_job(event) {
+                error = Some(failure);
+            }
         }
         if let Some(run) = &mut self.current
             && run.status == "running"
@@ -1237,12 +1364,17 @@ impl App {
                 .job_started
                 .map(|s| s.elapsed().as_millis() as u64)
                 .unwrap_or(0);
-            self.store.save(run)?;
-            self.runs = self.store.list()?;
+            self.checkpoint.changed(0);
+            self.phase = "Cancelled".into();
         }
-        self.phase = "Cancelled".into();
-        while self.rx.try_recv().is_ok() {}
-        Ok(())
+        self.job_generation += 1;
+        self.job_started = None;
+        self.flush_research(true)?;
+        self.refresh_archive()?;
+        match error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
     pub async fn finish_cancelled(&mut self) {
         let jobs = std::mem::take(&mut self.retired_jobs);
@@ -1260,45 +1392,93 @@ impl App {
                     self.apply_job(*event)?;
                 }
             }
-            JobEvent::Research(event) => match *event {
-                ResearchEvent::Phase(phase) => {
-                    self.phase = phase.clone();
-                    self.events.push(phase);
+            JobEvent::Research(event) => {
+                if !self
+                    .current
+                    .as_ref()
+                    .is_some_and(|run| run.status == "running")
+                {
+                    return Ok(());
                 }
-                ResearchEvent::Source(source) => {
-                    if let Some(run) = &mut self.current {
-                        run.sources.push(source);
-                        self.store.save(run)?;
+                match *event {
+                    ResearchEvent::Phase(phase) => {
+                        self.phase = phase.clone();
+                        self.events.push(phase);
                     }
-                }
-                ResearchEvent::Warning(w) => {
-                    self.events.push(format!("! {w}"));
-                    if let Some(run) = &mut self.current {
-                        run.warnings.push(w);
-                        self.store.save(run)?;
-                    }
-                }
-                ResearchEvent::Delta(text) => {
-                    if let Some(run) = &mut self.current {
-                        run.report.push_str(&text);
-                        if self.tick.is_multiple_of(10) {
-                            self.store.save(run)?;
+                    ResearchEvent::Source(source) => {
+                        if let Some(run) = &mut self.current {
+                            run.sources.push(source);
                         }
+                        self.checkpoint.changed(0);
+                        self.flush_research(true)?;
+                    }
+                    ResearchEvent::Warning(w) => {
+                        self.events.push(format!("! {w}"));
+                        if let Some(run) = &mut self.current {
+                            run.warnings.push(w);
+                        }
+                        self.checkpoint.changed(0);
+                        self.flush_research(true)?;
+                    }
+                    ResearchEvent::Delta(text) => {
+                        self.checkpoint.changed(text.len());
+                        if let Some(run) = &mut self.current {
+                            run.report.push_str(&text);
+                        }
+                        self.flush_research(false)?;
+                    }
+                    ResearchEvent::Finished(run) => {
+                        if self
+                            .current
+                            .as_ref()
+                            .is_none_or(|current| current.id != run.id)
+                        {
+                            return Ok(());
+                        }
+                        self.phase = if run.status == "complete" {
+                            "Research complete".into()
+                        } else {
+                            "Research needs attention".into()
+                        };
+                        let failed = run.status != "complete";
+                        self.current = Some(run);
+                        self.checkpoint.changed(0);
+                        self.maintain_jobs()?;
+                        self.notify(self.phase.clone(), failed);
                     }
                 }
-                ResearchEvent::Finished(run) => {
-                    self.phase = if run.status == "complete" {
-                        "Research complete".into()
-                    } else {
-                        "Research needs attention".into()
-                    };
-                    self.store.save(&run)?;
-                    self.notify(self.phase.clone(), run.status != "complete");
-                    self.current = Some(run);
-                    self.runs = self.store.list()?;
-                    self.job = None;
+            }
+            JobEvent::Stopped => {
+                if self.busy() {
+                    if self
+                        .current
+                        .as_ref()
+                        .is_some_and(|run| run.status != "running")
+                        && self.checkpoint.dirty()
+                    {
+                        self.maintain_jobs()?;
+                        return Ok(());
+                    }
+                    let message = "Background job stopped before returning a result; partial work was preserved.";
+                    if let Some(run) = &mut self.current
+                        && run.status == "running"
+                    {
+                        run.status = "failed".into();
+                        run.elapsed_ms = self
+                            .job_started
+                            .map(|s| s.elapsed().as_millis() as u64)
+                            .unwrap_or(0);
+                        run.warnings.push(message.into());
+                        self.checkpoint.changed(0);
+                    }
+                    self.maintain_jobs()?;
+                    if self.busy() {
+                        self.finish_job();
+                    }
+                    self.phase = "Job needs attention".into();
+                    self.notify(message, true);
                 }
-            },
+            }
             JobEvent::Market(results) => {
                 for (symbol, result) in results {
                     match result {
@@ -1311,7 +1491,7 @@ impl App {
                         }
                     }
                 }
-                self.job = None;
+                self.finish_job();
                 self.phase = "Daily history refreshed".into();
                 self.notify(
                     format!(
@@ -1323,7 +1503,7 @@ impl App {
                 );
             }
             JobEvent::Checked(result) => {
-                self.job = None;
+                self.finish_job();
                 match result {
                     Ok(text) => self.notify(text, false),
                     Err(text) => self.notify(text, true),
@@ -1336,7 +1516,7 @@ impl App {
                 }
             }
             JobEvent::LeanDone(result) => {
-                self.job = None;
+                self.finish_job();
                 match result {
                     Ok(stats) => {
                         self.lean_stats = stats;
@@ -1346,7 +1526,7 @@ impl App {
                 }
             }
             JobEvent::Cloud(result) => {
-                self.job = None;
+                self.finish_job();
                 match result {
                     Ok(text) => {
                         self.events = text.lines().map(str::to_string).collect();
@@ -1468,15 +1648,15 @@ impl App {
         self.page = Page::Lab;
         self.lab_tab = 1;
         self.phase = "Running LEAN backtest".into();
-        self.job_started = Some(Instant::now());
-        self.job = Some(tokio::spawn(async move {
+        let supervisor = tx.clone();
+        self.spawn_job(supervisor, async move {
             let (log_tx, mut log_rx) = mpsc::unbounded_channel();
             let task = crate::backtest::lean_run(&workspace, &project, &output, &log_tx);
             tokio::pin!(task);
             loop {
                 tokio::select! {result=&mut task=>{while let Ok(line)=log_rx.try_recv(){let _=tx.send(JobEvent::LeanLog(line));}let _=tx.send(JobEvent::LeanDone(result.map_err(|e|secrets.redact(&format!("{e:#}")))));break;},Some(line)=log_rx.recv()=>{let _=tx.send(JobEvent::LeanLog(line));}}
             }
-        }));
+        });
         Ok(())
     }
     pub fn cloud(&mut self) -> Result<()> {
@@ -1494,8 +1674,8 @@ impl App {
         self.lab_tab = 2;
         self.events.clear();
         self.phase = "Reading cloud backtests".into();
-        self.job_started = Some(Instant::now());
-        self.job = Some(tokio::spawn(async move {
+        let supervisor = tx.clone();
+        self.spawn_job(supervisor, async move {
             let result = crate::backtest::qc_request(
                 &config,
                 &secrets,
@@ -1506,7 +1686,7 @@ impl App {
             .and_then(|v| Ok(serde_json::to_string_pretty(&v)?))
             .map_err(|e| secrets.redact(&format!("{e:#}")));
             let _ = tx.send(JobEvent::Cloud(result));
-        }));
+        });
         Ok(())
     }
     pub fn on_tick(&mut self) {
@@ -1518,5 +1698,71 @@ impl App {
         {
             self.toast = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn supervised_workers_that_panic_or_return_without_result_stop_the_job() {
+        for panic in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app =
+                App::new(Paths::new(Some(dir.path().to_path_buf())).unwrap(), true).unwrap();
+            let run = ResearchRun::new(
+                ResearchRequest {
+                    kind: ResearchKind::Custom,
+                    symbols: vec![],
+                    question: "Fixture".into(),
+                    prior: None,
+                },
+                "fixture".into(),
+                "fixture".into(),
+                true,
+            );
+            app.store.save(&run).unwrap();
+            app.current = Some(run);
+            let tx = app.job_sender();
+            app.spawn_job(tx, async move {
+                assert!(!panic, "private panic fixture");
+            });
+            let event = tokio::time::timeout(Duration::from_secs(2), app.rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            app.apply_job(event).unwrap();
+            assert!(!app.busy());
+            assert!(app.job_started.is_none());
+            let run = app.current.as_ref().unwrap();
+            assert_eq!(run.status, "failed");
+            assert!(!run.warnings.join(" ").contains("private panic fixture"));
+            assert_eq!(app.store.get(&run.id).unwrap().status, "failed");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_supervised_worker_drops_its_future() {
+        struct Dropped(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(Paths::new(Some(dir.path().to_path_buf())).unwrap(), true).unwrap();
+        let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let guard = Dropped(dropped.clone());
+        let tx = app.job_sender();
+        app.spawn_job(tx, async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        app.cancel().unwrap();
+        app.finish_cancelled().await;
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!app.busy());
     }
 }

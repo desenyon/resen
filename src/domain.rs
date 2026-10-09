@@ -230,7 +230,8 @@ pub fn parse_symbols(input: &str) -> anyhow::Result<Vec<String>> {
     {
         let symbol = raw.trim_start_matches('$').to_ascii_uppercase();
         anyhow::ensure!(
-            symbol.len() <= 15
+            !symbol.is_empty()
+                && symbol.len() <= 15
                 && symbol
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '^')),
