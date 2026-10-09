@@ -970,9 +970,19 @@ fn archive(f: &mut Frame, area: Rect, app: &mut App) {
         .block(panel(" FILTER ")),
         rows[1],
     );
+    let history_title = format!(
+        " HISTORY {}/{} · PgUp/PgDn · {} unreadable ",
+        if app.archive_total == 0 {
+            0
+        } else {
+            app.archive_offset / crate::store::ARCHIVE_PAGE_SIZE + 1
+        },
+        app.archive_total.div_ceil(crate::store::ARCHIVE_PAGE_SIZE),
+        app.archive_unreadable
+    );
     let indices = app.filtered_runs();
     if indices.is_empty() {
-        let block = panel(" RESEARCH HISTORY ");
+        let block = panel(history_title);
         let inner = block.inner(rows[2]);
         f.render_widget(block, rows[2]);
         text(
@@ -1012,7 +1022,7 @@ fn archive(f: &mut Frame, area: Rect, app: &mut App) {
         let mut state = ListState::default().with_selected(Some(app.archive_selected));
         f.render_stateful_widget(
             List::new(entries)
-                .block(panel(" RESEARCH HISTORY "))
+                .block(panel(history_title))
                 .highlight_style(Style::new().fg(MINT).bg(SELECT))
                 .highlight_symbol("▎ "),
             rows[2],
@@ -1054,7 +1064,7 @@ fn archive(f: &mut Frame, area: Rect, app: &mut App) {
         )
         .row_highlight_style(Style::new().fg(MINT).bg(SELECT))
         .highlight_symbol("▎ ")
-        .block(panel(" RESEARCH HISTORY ")),
+        .block(panel(history_title)),
         rows[2],
         &mut state,
     );
@@ -1610,7 +1620,9 @@ fn render_modal(f: &mut Frame, area: Rect, modal: &mut Modal, app: &App) {
                 Line::raw("r             Refresh daily history on the desk"),
                 Line::raw("f             Follow up from the research page"),
                 Line::raw("e             Export the current memo as Markdown + JSON"),
-                Line::raw("/             Search the archive"),
+                Line::raw("/             Search the full archive"),
+                Line::raw("PgUp/PgDn     Previous/next archive page"),
+                Line::raw("Home/End      First/last archive page"),
                 Line::raw("b / ←→        Backtest parameters / lab tabs"),
                 Line::raw("p / l / c     Python template / run LEAN / cloud results"),
                 Line::raw("ctrl+c        Cancel a running job; otherwise quit"),

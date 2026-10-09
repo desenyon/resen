@@ -49,13 +49,14 @@ def main():
         fakebin.mkdir()
         codex = fakebin / "codex"
         codex.write_text("""#!/usr/bin/env python3
-import os, sys, time
+import json, os, sys, time
 from pathlib import Path
 assert sys.argv[1] == 'exec'
 assert 'features.shell_tool=false' in sys.argv
 assert 'web_search="disabled"' in sys.argv
 assert 'UNTRUSTED SOURCE LEDGER' in sys.stdin.read()
 Path(os.environ['RESEN_QA_CHILD_PID']).write_text(str(os.getpid()))
+print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Checkpoint fixture partial memo [1].'}}), flush=True)
 time.sleep(60)
 """)
         codex.chmod(0o700)
@@ -68,7 +69,7 @@ time.sleep(60)
         fixture.write_text("Date,Open,High,Low,Close,Volume\n"
                            "2025-01-02,100,102,99,101,1000\n"
                            "2025-01-03,101,103,100,102,1000\n")
-        for mode in ["headless-SIGINT", "headless-SIGTERM", "terminal-quit", "terminal-SIGTERM"]:
+        for mode in ["headless-SIGINT", "headless-SIGTERM", "headless-SIGKILL", "terminal-quit", "terminal-SIGTERM"]:
             state = root / mode
             state.mkdir()
             state.joinpath("config.toml").write_text(
@@ -115,7 +116,18 @@ time.sleep(60)
                 check(marker.exists(), f"{mode}: native provider process starts")
                 child_pid = int(marker.read_text())
                 check(alive(child_pid), f"{mode}: provider is running before cancellation")
-                if mode == "terminal-quit":
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with sqlite3.connect(state / "research.db") as db:
+                        checkpoint = json.loads(db.execute("SELECT body FROM runs").fetchone()[0])
+                    if "Checkpoint fixture partial memo" in checkpoint["report"]:
+                        break
+                    drain()
+                check(checkpoint["status"] == "running" and "Checkpoint fixture partial memo" in checkpoint["report"],
+                      f"{mode}: stalled stream is checkpointed before termination")
+                if mode == "headless-SIGKILL":
+                    process.kill()
+                elif mode == "terminal-quit":
                     os.write(master, b"q")
                 else:
                     process.send_signal(signal.SIGTERM if mode.endswith("SIGTERM") else signal.SIGINT)
@@ -125,14 +137,23 @@ time.sleep(60)
                 process.wait(timeout=1)
                 check((process.returncode == 0) if terminal else (process.returncode != 0),
                       f"{mode}: application exits with the expected status")
+                if mode == "headless-SIGKILL":
+                    # SIGKILL cannot run child cleanup. Stop this known fixture child.
+                    if alive(child_pid):
+                        os.kill(child_pid, signal.SIGKILL)
+                    output = subprocess.run([binary, "--data-dir", str(state), "history", "--json"],
+                                            env=env, check=True, capture_output=True, text=True, timeout=10)
+                    recovered = json.loads(output.stdout)["runs"][0]
+                    check(recovered["status"] == "interrupted", f"{mode}: next launch recovers interrupted research")
                 deadline = time.monotonic() + 2
                 while alive(child_pid) and time.monotonic() < deadline:
                     time.sleep(0.05)
                 check(not alive(child_pid), f"{mode}: cancelled provider stops")
                 with sqlite3.connect(state / "research.db") as db:
                     run = json.loads(db.execute("SELECT body FROM runs").fetchone()[0])
-                check(run["status"] == "cancelled" and run["sources"],
-                      f"{mode}: cancellation preserves the source ledger")
+                expected = "interrupted" if mode == "headless-SIGKILL" else "cancelled"
+                check(run["status"] == expected and run["sources"] and "Checkpoint fixture partial memo" in run["report"],
+                      f"{mode}: termination preserves the source ledger and partial memo")
                 if terminal:
                     for _ in range(4):
                         drain()

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Search and page through the full archive in the terminal and CLI, with exact
+  status filtering, JSON results, stable ordering and unreadable-record diagnostics.
+- Migrate old databases transactionally to schema 2; reject unknown future versions
+  and recover every abandoned run without a 200-record limit.
+- Preserve corrupt JSON and mismatched IDs while keeping healthy history available.
+- Share worker supervision and checkpoint policy across CLI and TUI jobs; preserve
+  queued output on cancellation and retry failed final saves without replacing data.
+- Checkpoint stalled streams by elapsed time and text volume, independently of UI ticks.
+- Reject empty normalized symbols and document archive migration, backups, querying,
+  configuration and recovery limits. Add migration/lifecycle regressions and real
+  process checks for stalled output and hard-kill recovery.
+
 ## 0.2.2
 
 Resen's first downloadable release, including the complete terminal research desk

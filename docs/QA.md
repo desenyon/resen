@@ -1,5 +1,45 @@
 # QA evidence
 
+## Archive and lifecycle upgrade — 9 October 2026
+
+Fresh local validation on macOS arm64 with Rust/Cargo 1.99.0:
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --check` | Passed |
+| `cargo clippy --all-targets --locked --offline -- -D warnings` | Passed |
+| `cargo test --locked --offline` | 102 tests passed, including loopback provider contracts |
+| `cargo build --release --locked --offline` | Passed |
+| Installer QA against the optimized binary | 14 tests passed; actual install and offline study passed |
+| PTY QA against the optimized binary | 24 checks passed |
+| Process QA against the optimized binary | 35 checks passed |
+
+The 21 new Rust regressions cover migration/recovery rollback, schema 0/1 upgrades,
+future-version rejection, recovery beyond 200 records, corrupt JSON and mismatched
+IDs, repaired records, fractional timestamp order, stable pagination, CLI JSON
+queries, terminal search/paging, symbol validation, checkpoint batching, silent
+streams, queued cancellation, late events, final-save retries, and unexpected
+worker termination. Existing UI fixtures now persist their records through SQLite
+so archive interactions exercise the same query path as the application.
+
+Process QA uses a controlled model executable and imported synthetic evidence.
+It emits one partial memo and then stalls. Both frontends must checkpoint it
+before termination. SIGINT/SIGTERM and terminal quit preserve the partial memo
+and ledger and stop the fixture child. The additional headless SIGKILL case
+verifies restart changes the saved run to `interrupted`; the harness explicitly
+kills the fixture child because a hard-killed parent cannot perform cleanup.
+Terminal checks verify restored attributes, alternate screen and paste mode.
+
+The first sandboxed full-suite attempt could not bind loopback mock-server ports;
+the complete suite subsequently passed with loopback permission. Rust 1.89,
+Linux, Windows and the RustSec audit are delegated to the existing exact-commit
+CI jobs; they are not claimed as local passes. `cargo-audit` and `rustup` were not
+installed on this host. No live vendor, paid model, QuantConnect or Docker-engine
+acceptance is claimed for this change. Build/test logs and smoke reports are
+retained under ignored `.qa/upgrade/`.
+
+The dated release evidence below belongs to earlier snapshots.
+
 Validation date: 2 October 2026. Local host: macOS arm64, Rust/Cargo 1.99.0.
 This is a release candidate; the evidence below distinguishes local application
 verification from account-dependent service acceptance. Final checks completed
